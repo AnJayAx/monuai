@@ -54,7 +54,7 @@ class _ScanScreenState extends State<ScanScreen> {
       final gpuOptions = InterpreterOptions()..addDelegate(GpuDelegateV2());
 
       _interpreter = await Interpreter.fromAsset(
-        'assets/models/best_float32.tflite',
+        'assets/models/best_float32_640.tflite',
         options: gpuOptions,
       );
 
@@ -67,7 +67,7 @@ class _ScanScreenState extends State<ScanScreen> {
       debugPrint('GPU failed, trying CPU: $e');
       try {
         _interpreter = await Interpreter.fromAsset(
-          'assets/models/best_float32.tflite',
+          'assets/models/best_float32_640.tflite',
         );
         setState(() {
           _modelLoaded = true;
@@ -128,10 +128,10 @@ class _ScanScreenState extends State<ScanScreen> {
 
       final inputImage = _preprocessImage(cameraImage);
 
-      // Output for 320x320: [1, 8, 2100]
+      // Output for 640x640: [1, 8, 8400]
       var output = List.generate(
         1,
-        (_) => List.generate(8, (_) => List.filled(2100, 0.0)),
+        (_) => List.generate(8, (_) => List.filled(8400, 0.0)),
       );
 
       _interpreter?.run(inputImage, output);
@@ -151,14 +151,14 @@ class _ScanScreenState extends State<ScanScreen> {
     final input = List.generate(
       1,
       (_) => List.generate(
-        320,
-        (y) => List.generate(320, (x) {
+        640,
+        (y) => List.generate(640, (x) {
           // Swap axes with vertical flip
-          final srcY = ((320 - 1 - x) * image.height / 320).floor().clamp(
+          final srcY = ((640 - 1 - x) * image.height / 640).floor().clamp(
             0,
             image.height - 1,
           );
-          final srcX = (y * image.width / 320).floor().clamp(
+          final srcX = (y * image.width / 640).floor().clamp(
             0,
             image.width - 1,
           );
@@ -180,7 +180,7 @@ class _ScanScreenState extends State<ScanScreen> {
   void _processOutput(List<List<List<double>>> output) {
     List<Detection> newDetections = [];
 
-    for (int i = 0; i < 2100; i++) {
+    for (int i = 0; i < 8400; i++) {
       double maxConfidence = 0.0;
       int detectedClass = -1;
 
@@ -198,18 +198,18 @@ class _ScanScreenState extends State<ScanScreen> {
         double width = output[0][2][i];
         double height = output[0][3][i];
 
-        double left = (xCenter - width / 2) * 320;
-        double top = (yCenter - height / 2) * 320;
-        double right = (xCenter + width / 2) * 320;
-        double bottom = (yCenter + height / 2) * 320;
+        double left = (xCenter - width / 2) * 640;
+        double top = (yCenter - height / 2) * 640;
+        double right = (xCenter + width / 2) * 640;
+        double bottom = (yCenter + height / 2) * 640;
 
         newDetections.add(
           Detection(
             boundingBox: Rect.fromLTRB(
-              left.clamp(0, 320),
-              top.clamp(0, 320),
-              right.clamp(0, 320),
-              bottom.clamp(0, 320),
+              left.clamp(0, 640),
+              top.clamp(0, 640),
+              right.clamp(0, 640),
+              bottom.clamp(0, 640),
             ),
             label: _landmarkNames[detectedClass],
             confidence: maxConfidence,
@@ -262,8 +262,8 @@ class _ScanScreenState extends State<ScanScreen> {
                               child: FittedBox(
                                 fit: BoxFit.cover,
                                 child: SizedBox(
-                                  width: 320,
-                                  height: 320,
+                                  width: 640,
+                                  height: 640,
                                   child: CameraPreview(_cameraController),
                                 ),
                               ),
@@ -324,7 +324,7 @@ class BoundingBoxPainter extends CustomPainter {
       textAlign: TextAlign.left,
     );
 
-    final scale = size.width / 320.0;
+    final scale = size.width / 640.0;
 
     for (var detection in detections) {
       final rect = Rect.fromLTRB(
