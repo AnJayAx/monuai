@@ -65,7 +65,7 @@ class _ScanScreenState extends State<ScanScreen> {
 
       _cameraController = CameraController(
         cameras[0],
-        ResolutionPreset.medium,
+        ResolutionPreset.high,
         enableAudio: false,
       );
 
@@ -95,7 +95,7 @@ class _ScanScreenState extends State<ScanScreen> {
   Future<void> _runInference(CameraImage cameraImage) async {
     try {
       // Skip every other frame to reduce load
-      if (_frameCount++ % 2 != 0) {
+      if (_frameCount++ % 4 != 0) {
         _isProcessing = false;
         return;
       }
