@@ -25,7 +25,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Landmark Detector',
       theme: ThemeData(primarySwatch: Colors.blue, useMaterial3: true),
-      home: const ScanScreen(),
+      home: const MainScreen(),
       debugShowCheckedModeBanner: false,
     );
   }
