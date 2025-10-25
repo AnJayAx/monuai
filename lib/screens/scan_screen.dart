@@ -1,6 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
+import 'dart:math' as math;
+
+class Detection {
+  final Rect boundingBox;
+  final String label;
+  final double confidence;
+
+  Detection({
+    required this.boundingBox,
+    required this.label,
+    required this.confidence,
+  });
+}
 
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
@@ -18,9 +31,10 @@ class _ScanScreenState extends State<ScanScreen> {
   bool _isProcessing = false;
   int _frameCount = 0;
 
+  List<Detection> _detections = [];
+
   Interpreter? _interpreter;
 
-  // Landmark class names (update based on your training)
   final List<String> _landmarkNames = [
     'Art Science Museum',
     'Esplanade',
@@ -37,19 +51,33 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Future<void> _loadModel() async {
     try {
+      final gpuOptions = InterpreterOptions()..addDelegate(GpuDelegateV2());
+
       _interpreter = await Interpreter.fromAsset(
         'assets/models/best_float32.tflite',
+        options: gpuOptions,
       );
+
       setState(() {
         _modelLoaded = true;
-        _detectedLandmark = '✓ Model loaded\nPoint camera at landmark';
+        _detectedLandmark = '✓ Model loaded (GPU)\nPoint at landmark';
       });
-      debugPrint('✓ Model loaded successfully');
+      debugPrint('✓ Model loaded with GPU acceleration');
     } catch (e) {
-      setState(() {
-        _detectedLandmark = 'Model load failed: $e';
-      });
-      debugPrint('✗ Model load error: $e');
+      debugPrint('GPU failed, trying CPU: $e');
+      try {
+        _interpreter = await Interpreter.fromAsset(
+          'assets/models/best_float32.tflite',
+        );
+        setState(() {
+          _modelLoaded = true;
+          _detectedLandmark = '✓ Model loaded (CPU)\nPoint at landmark';
+        });
+      } catch (e2) {
+        setState(() {
+          _detectedLandmark = 'Model load failed: $e2';
+        });
+      }
     }
   }
 
@@ -65,7 +93,7 @@ class _ScanScreenState extends State<ScanScreen> {
 
       _cameraController = CameraController(
         cameras[0],
-        ResolutionPreset.high,
+        ResolutionPreset.low,
         enableAudio: false,
       );
 
@@ -77,7 +105,6 @@ class _ScanScreenState extends State<ScanScreen> {
           _isCameraInitialized = true;
         });
 
-        // Start image stream for real-time detection
         _cameraController.startImageStream((CameraImage cameraImage) {
           if (!_isProcessing && _modelLoaded) {
             _isProcessing = true;
@@ -94,25 +121,21 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Future<void> _runInference(CameraImage cameraImage) async {
     try {
-      // Skip every other frame to reduce load
-      if (_frameCount++ % 4 != 0) {
+      if (_frameCount++ % 5 != 0) {
         _isProcessing = false;
         return;
       }
 
-      // Simplified preprocessing - much faster
       final inputImage = _preprocessImage(cameraImage);
 
-      // Output tensor
+      // Output for 320x320: [1, 8, 2100]
       var output = List.generate(
         1,
-        (_) => List.generate(8, (_) => List.filled(8400, 0.0)),
+        (_) => List.generate(8, (_) => List.filled(2100, 0.0)),
       );
 
-      // Run inference
       _interpreter?.run(inputImage, output);
 
-      // Process output
       _processOutput(output);
     } catch (e) {
       debugPrint('Inference error: $e');
@@ -122,21 +145,31 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   List<List<List<List<double>>>> _preprocessImage(CameraImage image) {
-    // Downsample and convert in one pass - much faster
+    // Camera gives us landscape (width > height), but we need portrait
+    // Swap axes AND flip vertically to match screen orientation
+
     final input = List.generate(
       1,
       (_) => List.generate(
-        640,
-        (y) => List.generate(640, (x) {
-          // Sample from original image with downsampling
-          final srcY = (y * image.height / 640).floor();
-          final srcX = (x * image.width / 640).floor();
-          final pixelIndex = srcY * image.width + srcX;
+        320,
+        (y) => List.generate(320, (x) {
+          // Swap axes with vertical flip
+          final srcY = ((320 - 1 - x) * image.height / 320).floor().clamp(
+            0,
+            image.height - 1,
+          );
+          final srcX = (y * image.width / 320).floor().clamp(
+            0,
+            image.width - 1,
+          );
+          final pixelIndex = (srcY * image.width + srcX).clamp(
+            0,
+            image.planes[0].bytes.length - 1,
+          );
 
-          // Get Y value (grayscale approximation for speed)
           final yValue = image.planes[0].bytes[pixelIndex].toDouble() / 255.0;
 
-          return [yValue, yValue, yValue]; // RGB from grayscale
+          return [yValue, yValue, yValue];
         }),
       ),
     );
@@ -145,33 +178,54 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   void _processOutput(List<List<List<double>>> output) {
-    // YOLOv8 output format: [1, 8, 8400]
-    // 8 = 4 box coordinates + 4 classes
+    List<Detection> newDetections = [];
 
-    double maxConfidence = 0.0;
-    int detectedClass = -1;
+    for (int i = 0; i < 2100; i++) {
+      double maxConfidence = 0.0;
+      int detectedClass = -1;
 
-    // Find highest confidence detection
-    for (int i = 0; i < 8400; i++) {
-      // Classes are at indices 4-7
       for (int cls = 4; cls < 8; cls++) {
         double confidence = output[0][cls][i];
-        if (confidence > maxConfidence && confidence > 0.3) {
-          // 30% confidence threshold
+        if (confidence > maxConfidence) {
           maxConfidence = confidence;
-          detectedClass = cls - 4; // Subtract 4 to get class index (0-3)
+          detectedClass = cls - 4;
         }
+      }
+
+      if (maxConfidence > 0.25) {
+        double xCenter = output[0][0][i];
+        double yCenter = output[0][1][i];
+        double width = output[0][2][i];
+        double height = output[0][3][i];
+
+        double left = (xCenter - width / 2) * 320;
+        double top = (yCenter - height / 2) * 320;
+        double right = (xCenter + width / 2) * 320;
+        double bottom = (yCenter + height / 2) * 320;
+
+        newDetections.add(
+          Detection(
+            boundingBox: Rect.fromLTRB(
+              left.clamp(0, 320),
+              top.clamp(0, 320),
+              right.clamp(0, 320),
+              bottom.clamp(0, 320),
+            ),
+            label: _landmarkNames[detectedClass],
+            confidence: maxConfidence,
+          ),
+        );
       }
     }
 
-    if (detectedClass != -1 && mounted) {
+    if (mounted) {
       setState(() {
-        _detectedLandmark = '${_landmarkNames[detectedClass]}\n'
-            'Confidence: ${(maxConfidence * 100).toStringAsFixed(1)}%';
-      });
-    } else if (mounted) {
-      setState(() {
-        _detectedLandmark = 'No landmark detected\nPoint at a landmark';
+        _detections = newDetections;
+        if (newDetections.isNotEmpty) {
+          _detectedLandmark = '${newDetections.length} landmark(s) detected';
+        } else {
+          _detectedLandmark = 'No landmark detected';
+        }
       });
     }
   }
@@ -194,7 +248,37 @@ class _ScanScreenState extends State<ScanScreen> {
           ? Stack(
               fit: StackFit.expand,
               children: [
-                CameraPreview(_cameraController),
+                Center(
+                  child: AspectRatio(
+                    aspectRatio: 1.0,
+                    child: Container(
+                      color: Colors.black,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          ClipRect(
+                            child: OverflowBox(
+                              alignment: Alignment.center,
+                              child: FittedBox(
+                                fit: BoxFit.cover,
+                                child: SizedBox(
+                                  width: 320,
+                                  height: 320,
+                                  child: CameraPreview(_cameraController),
+                                ),
+                              ),
+                            ),
+                          ),
+                          CustomPaint(
+                            painter: BoundingBoxPainter(
+                              detections: _detections,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
                 Positioned(
                   bottom: 20,
                   left: 20,
@@ -221,4 +305,64 @@ class _ScanScreenState extends State<ScanScreen> {
           : const Center(child: CircularProgressIndicator()),
     );
   }
+}
+
+class BoundingBoxPainter extends CustomPainter {
+  final List<Detection> detections;
+
+  BoundingBoxPainter({required this.detections});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0
+      ..color = Colors.greenAccent;
+
+    final textPainter = TextPainter(
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.left,
+    );
+
+    final scale = size.width / 320.0;
+
+    for (var detection in detections) {
+      final rect = Rect.fromLTRB(
+        detection.boundingBox.left * scale,
+        detection.boundingBox.top * scale,
+        detection.boundingBox.right * scale,
+        detection.boundingBox.bottom * scale,
+      );
+
+      canvas.drawRect(rect, paint);
+
+      final labelText =
+          '${detection.label} ${(detection.confidence * 100).toStringAsFixed(0)}%';
+      textPainter.text = TextSpan(
+        text: labelText,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+        ),
+      );
+      textPainter.layout();
+
+      final labelRect = Rect.fromLTWH(
+        rect.left,
+        math.max(0, rect.top - 20),
+        textPainter.width + 8,
+        20,
+      );
+
+      canvas.drawRect(labelRect, Paint()..color = Colors.greenAccent);
+      textPainter.paint(
+        canvas,
+        Offset(rect.left + 4, math.max(0, rect.top - 18)),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(BoundingBoxPainter oldDelegate) => true;
 }
