@@ -70,11 +70,11 @@ class ScanScreen extends StatefulWidget {
 class _ScanScreenState extends State<ScanScreen> {
   late CameraController _cameraController;
   late Future<void> _initializeControllerFuture;
-  String _detectedLandmark = 'Loading...';
   bool _isCameraInitialized = false;
   bool _modelLoaded = false;
   bool _isProcessing = false;
   int _frameCount = 0;
+  String _notificationText = '';
 
   List<Detection> _detections = [];
 
@@ -105,7 +105,7 @@ class _ScanScreenState extends State<ScanScreen> {
 
       setState(() {
         _modelLoaded = true;
-        _detectedLandmark = '✓ Model loaded (GPU)\nPoint at landmark';
+        debugPrint('✓ Model loaded with GPU acceleration');
       });
       debugPrint('✓ Model loaded with GPU acceleration');
     } catch (e) {
@@ -116,11 +116,11 @@ class _ScanScreenState extends State<ScanScreen> {
         );
         setState(() {
           _modelLoaded = true;
-          _detectedLandmark = '✓ Model loaded (CPU)\nPoint at landmark';
+          debugPrint('✓ Model loaded (CPU)\nPoint at landmark');
         });
       } catch (e2) {
         setState(() {
-          _detectedLandmark = 'Model load failed: $e2';
+          debugPrint('Model load failed: $e2');
         });
       }
     }
@@ -131,7 +131,7 @@ class _ScanScreenState extends State<ScanScreen> {
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
         setState(() {
-          _detectedLandmark = 'No camera found';
+          debugPrint('No camera found');
         });
         return;
       }
@@ -159,7 +159,7 @@ class _ScanScreenState extends State<ScanScreen> {
       }
     } catch (e) {
       setState(() {
-        _detectedLandmark = 'Camera error: $e';
+        debugPrint('Camera error: $e');
       });
     }
   }
@@ -204,6 +204,20 @@ class _ScanScreenState extends State<ScanScreen> {
     } finally {
       _isProcessing = false;
     }
+  }
+
+  void _updateNotification(List<Detection> detections) {
+    if (detections.isEmpty) {
+      _notificationText = '';
+      return;
+    }
+
+    // Find landmark with highest confidence
+    detections.sort((a, b) => b.confidence.compareTo(a.confidence));
+    final topDetection = detections.first;
+
+    _notificationText =
+        '${topDetection.label} ${(topDetection.confidence * 100).toStringAsFixed(0)}% confidence detected';
   }
 
   void _processOutput(List<List<List<double>>> output) {
@@ -254,13 +268,15 @@ class _ScanScreenState extends State<ScanScreen> {
     );
 
     if (mounted) {
+      _updateNotification(filteredDetections);
+
       setState(() {
         _detections = filteredDetections;
         if (filteredDetections.isNotEmpty) {
-          _detectedLandmark =
-              '${filteredDetections.length} landmark(s) detected';
+          debugPrint(
+              '${filteredDetections.length} landmark(s) detected');
         } else {
-          _detectedLandmark = 'No landmark detected';
+          debugPrint('No landmark detected');
         }
       });
     }
@@ -355,21 +371,21 @@ class _ScanScreenState extends State<ScanScreen> {
                   ),
                 ),
                 Positioned(
-                  bottom: 20,
-                  left: 20,
-                  right: 20,
+                  top: 40,
+                  left: 16,
+                  right: 16,
                   child: Container(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
-                      _detectedLandmark,
+                      _notificationText,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w600,
                       ),
                       textAlign: TextAlign.center,
                     ),
