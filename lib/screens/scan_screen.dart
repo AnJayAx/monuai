@@ -2,6 +2,45 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'dart:math' as math;
+import 'dart:typed_data';
+
+// Converts a CameraImage to a float32 Uint8List buffer for model input
+Uint8List cameraImageToFloat32List(CameraImage image, int outHeight, int outWidth) {
+  final int inputSize = outHeight * outWidth * 3;
+  final Float32List floatList = Float32List(inputSize);
+
+  // Camera image size
+  final int inHeight = image.height;
+  final int inWidth = image.width;
+
+  int index = 0;
+  for (int y = 0; y < outHeight; y++) {
+    for (int x = 0; x < outWidth; x++) {
+      int srcX, srcY;
+
+      // If source image is landscape but output is portrait, swap axes.
+      if (inWidth > inHeight) {
+        // Portrait output, camera in landscape: rotate left!
+        srcX = (y * inWidth ~/ outHeight);  // <- swapped!
+        srcY = (outWidth - x - 1) * inHeight ~/ outWidth; // y axis flip for clockwise rotation
+      } else {
+        // No rotation needed, normal mapping
+        srcX = x * inWidth ~/ outWidth;
+        srcY = y * inHeight ~/ outHeight;
+      }
+
+      final int pxIdx = srcY * inWidth + srcX;
+      final yByte = image.planes[0].bytes[pxIdx];
+      final val = yByte / 255.0;
+      floatList[index++] = val; // R
+      floatList[index++] = val; // G
+      floatList[index++] = val; // B
+    }
+  }
+
+  return floatList.buffer.asUint8List();
+}
+
 
 class Detection {
   final Rect boundingBox;
@@ -126,7 +165,7 @@ class _ScanScreenState extends State<ScanScreen> {
         return;
       }
 
-      final inputImage = _preprocessImage(cameraImage);
+      final Uint8List inputBuffer = cameraImageToFloat32List(cameraImage, 640, 640);
 
       // Output for 640x640: [1, 8, 8400]
       var output = List.generate(
@@ -134,7 +173,7 @@ class _ScanScreenState extends State<ScanScreen> {
         (_) => List.generate(8, (_) => List.filled(8400, 0.0)),
       );
 
-      _interpreter?.run(inputImage, output);
+      _interpreter?.run(inputBuffer, output);
 
       _processOutput(output);
     } catch (e) {
@@ -142,39 +181,6 @@ class _ScanScreenState extends State<ScanScreen> {
     } finally {
       _isProcessing = false;
     }
-  }
-
-  List<List<List<List<double>>>> _preprocessImage(CameraImage image) {
-    // Camera gives us landscape (width > height), but we need portrait
-    // Swap axes AND flip vertically to match screen orientation
-
-    final input = List.generate(
-      1,
-      (_) => List.generate(
-        640,
-        (y) => List.generate(640, (x) {
-          // Swap axes with vertical flip
-          final srcY = ((640 - 1 - x) * image.height / 640).floor().clamp(
-            0,
-            image.height - 1,
-          );
-          final srcX = (y * image.width / 640).floor().clamp(
-            0,
-            image.width - 1,
-          );
-          final pixelIndex = (srcY * image.width + srcX).clamp(
-            0,
-            image.planes[0].bytes.length - 1,
-          );
-
-          final yValue = image.planes[0].bytes[pixelIndex].toDouble() / 255.0;
-
-          return [yValue, yValue, yValue];
-        }),
-      ),
-    );
-
-    return input;
   }
 
   void _processOutput(List<List<List<double>>> output) {
