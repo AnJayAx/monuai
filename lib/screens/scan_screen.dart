@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'dart:math' as math;
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 
 // Converts a CameraImage to a float32 Uint8List buffer for model input
-Uint8List cameraImageToFloat32List(CameraImage image, int outHeight, int outWidth) {
+Uint8List cameraImageToFloat32List(
+  CameraImage image,
+  int outHeight,
+  int outWidth,
+) {
   final int inputSize = outHeight * outWidth * 3;
   final Float32List floatList = Float32List(inputSize);
 
@@ -21,8 +25,11 @@ Uint8List cameraImageToFloat32List(CameraImage image, int outHeight, int outWidt
       // If source image is landscape but output is portrait, swap axes.
       if (inWidth > inHeight) {
         // Portrait output, camera in landscape: rotate left!
-        srcX = (y * inWidth ~/ outHeight);  // <- swapped!
-        srcY = (outWidth - x - 1) * inHeight ~/ outWidth; // y axis flip for clockwise rotation
+        srcX = (y * inWidth ~/ outHeight); // <- swapped!
+        srcY =
+            (outWidth - x - 1) *
+            inHeight ~/
+            outWidth; // y axis flip for clockwise rotation
       } else {
         // No rotation needed, normal mapping
         srcX = x * inWidth ~/ outWidth;
@@ -40,7 +47,6 @@ Uint8List cameraImageToFloat32List(CameraImage image, int outHeight, int outWidt
 
   return floatList.buffer.asUint8List();
 }
-
 
 class Detection {
   final Rect boundingBox;
@@ -159,23 +165,40 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   Future<void> _runInference(CameraImage cameraImage) async {
+    final stopwatchTotal = Stopwatch()..start();
+
     try {
       if (_frameCount++ % 5 != 0) {
         _isProcessing = false;
         return;
       }
 
-      final Uint8List inputBuffer = cameraImageToFloat32List(cameraImage, 640, 640);
+      final stopwatchPre = Stopwatch()..start();
+      final Uint8List inputBuffer = cameraImageToFloat32List(
+        cameraImage,
+        640,
+        640,
+      );
+      stopwatchPre.stop();
+      debugPrint('Pre-processing: ${stopwatchPre.elapsedMilliseconds} ms');
 
-      // Output for 640x640: [1, 8, 8400]
       var output = List.generate(
         1,
         (_) => List.generate(8, (_) => List.filled(8400, 0.0)),
       );
 
+      final stopwatchInference = Stopwatch()..start();
       _interpreter?.run(inputBuffer, output);
+      stopwatchInference.stop();
+      debugPrint('Inference: ${stopwatchInference.elapsedMilliseconds} ms');
 
       _processOutput(output);
+
+      stopwatchTotal.stop();
+      debugPrint(
+        'Total predict: ${stopwatchPre.elapsedMilliseconds + stopwatchInference.elapsedMilliseconds} ms',
+      );
+      debugPrint('Total elapsed: ${stopwatchTotal.elapsedMilliseconds} ms');
     } catch (e) {
       debugPrint('Inference error: $e');
     } finally {
