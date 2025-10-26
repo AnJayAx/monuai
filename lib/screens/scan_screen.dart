@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // Converts a CameraImage to a float32 Uint8List buffer for model input
 Uint8List cameraImageToFloat32List(
@@ -78,6 +79,9 @@ class _ScanScreenState extends State<ScanScreen> {
 
   List<Detection> _detections = [];
 
+  double _confidenceThreshold = 0.7;
+  static const String _kConfidenceThresholdKey = 'confidence_threshold';
+
   Interpreter? _interpreter;
 
   final List<String> _landmarkNames = [
@@ -92,6 +96,22 @@ class _ScanScreenState extends State<ScanScreen> {
     super.initState();
     _loadModel();
     _initializeCamera();
+    _loadConfidenceThreshold();
+  }
+
+  Future<void> _loadConfidenceThreshold() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final val = prefs.getDouble(_kConfidenceThresholdKey);
+      if (val != null && mounted) {
+        setState(() {
+          _confidenceThreshold = val;
+        });
+        debugPrint('Loaded confidence threshold: $_confidenceThreshold');
+      }
+    } catch (e) {
+      debugPrint('Failed to load confidence threshold: $e');
+    }
   }
 
   Future<void> _loadModel() async {
@@ -168,7 +188,7 @@ class _ScanScreenState extends State<ScanScreen> {
     final stopwatchTotal = Stopwatch()..start();
 
     try {
-      if (_frameCount++ % 5 != 0) {
+      if (_frameCount++ % 15 != 0) {
         _isProcessing = false;
         return;
       }
@@ -182,17 +202,14 @@ class _ScanScreenState extends State<ScanScreen> {
       stopwatchPre.stop();
       debugPrint('Pre-processing: ${stopwatchPre.elapsedMilliseconds} ms');
 
-      var output = List.generate(
-        1,
-        (_) => List.generate(8, (_) => List.filled(8400, 0.0)),
-      );
+      final Uint8List outputBuffer = Uint8List(1 * 8 * 8400 * 4);
 
       final stopwatchInference = Stopwatch()..start();
-      _interpreter?.run(inputBuffer, output);
+      _interpreter?.run(inputBuffer, outputBuffer);
       stopwatchInference.stop();
       debugPrint('Inference: ${stopwatchInference.elapsedMilliseconds} ms');
 
-      _processOutput(output);
+      _processOutput(outputBuffer);
 
       stopwatchTotal.stop();
       debugPrint(
@@ -220,26 +237,33 @@ class _ScanScreenState extends State<ScanScreen> {
         '${topDetection.label} ${(topDetection.confidence * 100).toStringAsFixed(0)}% confidence detected';
   }
 
-  void _processOutput(List<List<List<double>>> output) {
+  void _processOutput(Uint8List outputBuffer) {
+    // Convert Uint8List to Float32List
+    final Float32List outputFloats = outputBuffer.buffer.asFloat32List();
+
     List<Detection> newDetections = [];
 
+    // Parse the flat output: shape is [1, 8, 8400]
+    // Flat index: cls * 8400 + i
     for (int i = 0; i < 8400; i++) {
       double maxConfidence = 0.0;
       int detectedClass = -1;
 
+      // Check classes 4-7 (indices 4, 5, 6, 7)
       for (int cls = 4; cls < 8; cls++) {
-        double confidence = output[0][cls][i];
+        double confidence = outputFloats[cls * 8400 + i];
         if (confidence > maxConfidence) {
           maxConfidence = confidence;
           detectedClass = cls - 4;
         }
       }
 
-      if (maxConfidence > 0.25) {
-        double xCenter = output[0][0][i];
-        double yCenter = output[0][1][i];
-        double width = output[0][2][i];
-        double height = output[0][3][i];
+      if (maxConfidence >= _confidenceThreshold) {
+        // Extract bounding box coordinates
+        double xCenter = outputFloats[0 * 8400 + i];
+        double yCenter = outputFloats[1 * 8400 + i];
+        double width = outputFloats[2 * 8400 + i];
+        double height = outputFloats[3 * 8400 + i];
 
         double left = (xCenter - width / 2) * 640;
         double top = (yCenter - height / 2) * 640;
@@ -261,7 +285,7 @@ class _ScanScreenState extends State<ScanScreen> {
       }
     }
 
-    // Apply Non-Maximum Suppression with IoU threshold, for example 0.5
+    // Apply Non-Maximum Suppression
     List<Detection> filteredDetections = nonMaximumSuppression(
       newDetections,
       0.5,
@@ -273,8 +297,7 @@ class _ScanScreenState extends State<ScanScreen> {
       setState(() {
         _detections = filteredDetections;
         if (filteredDetections.isNotEmpty) {
-          debugPrint(
-              '${filteredDetections.length} landmark(s) detected');
+          debugPrint('${filteredDetections.length} landmark(s) detected');
         } else {
           debugPrint('No landmark detected');
         }

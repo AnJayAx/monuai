@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -11,6 +12,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _enableNotifications = true;
   bool _enableRealTimeDetection = true;
   double _confidenceThreshold = 0.7;
+
+  static const String _kConfidenceThresholdKey = 'confidence_threshold';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadConfidenceThreshold();
+  }
+
+  Future<void> _loadConfidenceThreshold() async {
+    final prefs = await SharedPreferences.getInstance();
+    final val = prefs.getDouble(_kConfidenceThresholdKey);
+    if (val != null) {
+      setState(() {
+        _confidenceThreshold = val;
+      });
+    }
+  }
+
+  Future<void> _saveConfidenceThreshold(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_kConfidenceThresholdKey, value);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -60,6 +84,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               setState(() {
                 _confidenceThreshold = value;
               });
+              _saveConfidenceThreshold(value);
             },
           ),
           const SizedBox(height: 24),
