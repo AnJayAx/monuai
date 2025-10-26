@@ -247,16 +247,62 @@ class _ScanScreenState extends State<ScanScreen> {
       }
     }
 
+    // Apply Non-Maximum Suppression with IoU threshold, for example 0.5
+    List<Detection> filteredDetections = nonMaximumSuppression(
+      newDetections,
+      0.5,
+    );
+
     if (mounted) {
       setState(() {
-        _detections = newDetections;
-        if (newDetections.isNotEmpty) {
-          _detectedLandmark = '${newDetections.length} landmark(s) detected';
+        _detections = filteredDetections;
+        if (filteredDetections.isNotEmpty) {
+          _detectedLandmark =
+              '${filteredDetections.length} landmark(s) detected';
         } else {
           _detectedLandmark = 'No landmark detected';
         }
       });
     }
+  }
+
+  // Computes Intersection over Union between two Rects
+  double _iou(Rect a, Rect b) {
+    double intersectionLeft = math.max(a.left, b.left);
+    double intersectionTop = math.max(a.top, b.top);
+    double intersectionRight = math.min(a.right, b.right);
+    double intersectionBottom = math.min(a.bottom, b.bottom);
+
+    double intersectionArea =
+        math.max(0, intersectionRight - intersectionLeft) *
+        math.max(0, intersectionBottom - intersectionTop);
+    double aArea = (a.right - a.left) * (a.bottom - a.top);
+    double bArea = (b.right - b.left) * (b.bottom - b.top);
+
+    return intersectionArea / (aArea + bArea - intersectionArea);
+  }
+
+  // Applies Non-Maximum Suppression on list of detections with IoU threshold
+  List<Detection> nonMaximumSuppression(
+    List<Detection> detections,
+    double iouThreshold,
+  ) {
+    detections.sort((a, b) => b.confidence.compareTo(a.confidence));
+
+    List<Detection> filtered = [];
+
+    for (var detection in detections) {
+      bool shouldAdd = true;
+      for (var kept in filtered) {
+        if (_iou(detection.boundingBox, kept.boundingBox) > iouThreshold) {
+          shouldAdd = false;
+          break;
+        }
+      }
+      if (shouldAdd) filtered.add(detection);
+    }
+
+    return filtered;
   }
 
   @override
