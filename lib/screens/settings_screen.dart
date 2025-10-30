@@ -10,7 +10,6 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _enableNotifications = true;
-  bool _enableRealTimeDetection = true;
   double _confidenceThreshold = 0.7;
 
   static const String _kConfidenceThresholdKey = 'confidence_threshold';
@@ -51,15 +50,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
-          SwitchListTile(
-            title: const Text('Enable Real-Time Detection'),
-            value: _enableRealTimeDetection,
-            onChanged: (value) {
-              setState(() {
-                _enableRealTimeDetection = value;
-              });
-            },
-          ),
           SwitchListTile(
             title: const Text('Enable Notifications'),
             value: _enableNotifications,

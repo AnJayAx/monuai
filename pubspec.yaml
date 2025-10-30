@@ -57,7 +57,7 @@ dev_dependencies:
 # The following section is specific to Flutter packages.
 flutter:
   assets:
-    - assets/models/best_float32_640.tflite
+    - assets/models/best_float32.tflite # YOLOv11n 640
     - assets/labels.txt
 
   # The following line ensures that the Material Icons font is
