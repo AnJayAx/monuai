@@ -3,11 +3,11 @@ import 'package:camera/camera.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'package:image/image.dart' as img;
 import 'dart:io';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // Converts a CameraImage to a float32 Uint8List buffer for model input
 Uint8List cameraImageToFloat32List(
@@ -80,6 +80,14 @@ class _ScanScreenState extends State<ScanScreen> {
   bool _isProcessing = false;
   bool _isDisposed = false;
   int _frameCount = 0;
+  // Preferences
+  static const String _kPrefUseGpu = 'use_gpu_delegate';
+  static const String _kPrefShowBoxes = 'show_boxes';
+  static const String _kPrefNotify = 'notify_on_detection';
+  bool _useGpu = true;
+  bool _showBoxes = true;
+  bool _notifyOnDetection = true;
+  final int _frameStride = 15;
 
   List<Detection> _detections = [];
   // Overlay threshold controls what boxes are drawn; discovery requires higher confidence
@@ -106,10 +114,20 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   void initState() {
     super.initState();
-    _loadModel();
+    _loadPrefs().then((_) => _loadModel());
     _imageStreamHandler = _onImageFromStream;
     _initializeCamera();
     _loadDiscovered();
+  }
+
+  Future<void> _loadPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _useGpu = prefs.getBool(_kPrefUseGpu) ?? true;
+      _showBoxes = prefs.getBool(_kPrefShowBoxes) ?? true;
+      _notifyOnDetection = prefs.getBool(_kPrefNotify) ?? true;
+      if (mounted) setState(() {});
+    } catch (_) {}
   }
 
   Future<void> _loadDiscovered() async {
@@ -126,18 +144,24 @@ class _ScanScreenState extends State<ScanScreen> {
 
   Future<void> _loadModel() async {
     try {
-      final gpuOptions = InterpreterOptions()..addDelegate(GpuDelegateV2());
-
-      _interpreter = await Interpreter.fromAsset(
-        'assets/models/best_float32.tflite',
-        options: gpuOptions,
-      );
-
-      setState(() {
-        _modelLoaded = true;
+      if (_useGpu) {
+        final gpuOptions = InterpreterOptions()..addDelegate(GpuDelegateV2());
+        _interpreter = await Interpreter.fromAsset(
+          'assets/models/best_float32.tflite',
+          options: gpuOptions,
+        );
+        setState(() {
+          _modelLoaded = true;
+          debugPrint('✓ Model loaded with GPU acceleration');
+        });
         debugPrint('✓ Model loaded with GPU acceleration');
-      });
-      debugPrint('✓ Model loaded with GPU acceleration');
+      } else {
+        _interpreter = await Interpreter.fromAsset('assets/models/best_float32.tflite');
+        setState(() {
+          _modelLoaded = true;
+          debugPrint('✓ Model loaded (CPU)');
+        });
+      }
     } catch (e) {
       debugPrint('GPU failed, trying CPU: $e');
       try {
@@ -205,7 +229,7 @@ class _ScanScreenState extends State<ScanScreen> {
     final stopwatchTotal = Stopwatch()..start();
 
     try {
-      if (_frameCount++ % 15 != 0) {
+      if (_frameCount++ % _frameStride != 0) {
         _isProcessing = false;
         return;
       }
@@ -232,7 +256,7 @@ class _ScanScreenState extends State<ScanScreen> {
       stopwatchInference.stop();
       debugPrint('Inference: ${stopwatchInference.elapsedMilliseconds} ms');
 
-      _processOutput(outputBuffer);
+  _processOutput(outputBuffer);
 
       stopwatchTotal.stop();
       debugPrint(
@@ -347,12 +371,12 @@ class _ScanScreenState extends State<ScanScreen> {
       (l) => !_sessionNotified.contains(l),
       orElse: () => newlyFound.first,
     );
-    if (!_sessionNotified.contains(firstNew) && mounted) {
+    if (_notifyOnDetection && !_sessionNotified.contains(firstNew) && mounted) {
       _sessionNotified.add(firstNew);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('New landmark detected: $firstNew'),
-          backgroundColor: Colors.green.shade700,
+          backgroundColor: Theme.of(context).colorScheme.primary,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
         ),
@@ -568,61 +592,127 @@ class _ScanScreenState extends State<ScanScreen> {
         centerTitle: true,
       ),
       body: _isCameraInitialized
-          ? Stack(
-              fit: StackFit.expand,
+          ? Column(
               children: [
-                Center(
-                  child: AspectRatio(
-                    aspectRatio: 1.0,
-                    child: Container(
-                      color: Colors.black,
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          ClipRect(
-                            child: OverflowBox(
-                              alignment: Alignment.center,
-                              child: FittedBox(
-                                fit: BoxFit.cover,
-                                child: SizedBox(
-                                  width: 640,
-                                  height: 640,
-                                  child: CameraPreview(_cameraController),
-                                ),
-                              ),
-                            ),
-                          ),
-                          CustomPaint(
-                            painter: BoundingBoxPainter(
-                              detections: _detections,
-                            ),
-                          ),
-                          if (!_modelLoaded)
-                            Align(
-                              alignment: Alignment.bottomCenter,
-                              child: Padding(
-                                padding: const EdgeInsets.only(bottom: 24.0),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.6),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: const [
-                                      SizedBox(
-                                        height: 16,
-                                        width: 16,
-                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Center(
+                        child: AspectRatio(
+                          aspectRatio: 1.0,
+                          child: Container(
+                            color: Colors.black,
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                ClipRect(
+                                  child: OverflowBox(
+                                    alignment: Alignment.center,
+                                    child: FittedBox(
+                                      fit: BoxFit.cover,
+                                      child: SizedBox(
+                                        width: 640,
+                                        height: 640,
+                                        child: CameraPreview(_cameraController),
                                       ),
-                                      SizedBox(width: 8),
-                                      Text('Loading model...', style: TextStyle(color: Colors.white)),
-                                    ],
+                                    ),
                                   ),
                                 ),
-                              ),
+                                if (_showBoxes)
+                                  CustomPaint(
+                                    painter: BoundingBoxPainter(
+                                      detections: _detections,
+                                      color: Theme.of(context).colorScheme.primary,
+                                    ),
+                                  ),
+                                // Guidance chip
+                                Positioned(
+                                  top: 12,
+                                  left: 12,
+                                  right: 12,
+                                  child: Align(
+                                    alignment: Alignment.topCenter,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withValues(alpha: 0.35),
+                                        borderRadius: BorderRadius.circular(24),
+                                      ),
+                                      child: const Text(
+                                        'Align the landmark within the frame',
+                                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                if (!_modelLoaded)
+                                  Align(
+                                    alignment: Alignment.bottomCenter,
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(bottom: 24.0),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.8),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: const [
+                                            SizedBox(
+                                              height: 16,
+                                              width: 16,
+                                              child: CircularProgressIndicator(strokeWidth: 2),
+                                            ),
+                                            SizedBox(width: 8),
+                                            Text('Loading model...'),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Controls below the camera
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                  child: Card(
+                    elevation: 1,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: SwitchListTile.adaptive(
+                              dense: true,
+                              title: const Text('Show boxes'),
+                              value: _showBoxes,
+                              onChanged: (v) async {
+                                setState(() => _showBoxes = v);
+                                final prefs = await SharedPreferences.getInstance();
+                                await prefs.setBool(_kPrefShowBoxes, v);
+                              },
+                            ),
+                          ),
+                          Expanded(
+                            child: SwitchListTile.adaptive(
+                              dense: true,
+                              title: const Text('Notify New Detection'),
+                              value: _notifyOnDetection,
+                              onChanged: (v) async {
+                                setState(() => _notifyOnDetection = v);
+                                final prefs = await SharedPreferences.getInstance();
+                                await prefs.setBool(_kPrefNotify, v);
+                              },
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -644,15 +734,22 @@ class _ScanScreenState extends State<ScanScreen> {
 
 class BoundingBoxPainter extends CustomPainter {
   final List<Detection> detections;
+  final Color? color;
 
-  BoundingBoxPainter({required this.detections});
+  BoundingBoxPainter({required this.detections, this.color});
 
   @override
   void paint(Canvas canvas, Size size) {
+    final c = color ?? Colors.greenAccent;
     final paint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.0
-      ..color = Colors.greenAccent;
+      ..color = c;
+
+    final shadow = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5.0
+      ..color = Colors.black.withValues(alpha: 0.25);
 
     final textPainter = TextPainter(
       textDirection: TextDirection.ltr,
@@ -669,7 +766,10 @@ class BoundingBoxPainter extends CustomPainter {
         detection.boundingBox.bottom * scale,
       );
 
-      canvas.drawRect(rect, paint);
+  // Shadow outline for readability
+  final rrect = RRect.fromRectXY(rect, 8, 8);
+  canvas.drawRRect(rrect, shadow);
+  canvas.drawRRect(rrect, paint);
 
       final labelText =
           '${detection.label} ${(detection.confidence * 100).toStringAsFixed(0)}%';
@@ -690,7 +790,7 @@ class BoundingBoxPainter extends CustomPainter {
         20,
       );
 
-      canvas.drawRect(labelRect, Paint()..color = Colors.greenAccent);
+      canvas.drawRect(labelRect, Paint()..color = c);
       textPainter.paint(
         canvas,
         Offset(rect.left + 4, math.max(0, rect.top - 18)),

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -99,14 +100,36 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
                   padding: const EdgeInsets.all(8.0),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.file(
-                      File(_imagePath),
-                      fit: BoxFit.contain,
-                      errorBuilder: (context, error, stack) {
-                        return const Center(
-                          child: Text('Unable to load image'),
-                        );
-                      },
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // Subtle blurred backdrop using the same image
+                        Positioned.fill(
+                          child: ImageFiltered(
+                            imageFilter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                            child: Image.file(
+                              File(_imagePath),
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                        // Foreground image contained
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(6.0),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: Image.file(
+                                File(_imagePath),
+                                fit: BoxFit.contain,
+                                errorBuilder: (context, error, stack) => const Center(
+                                  child: Text('Unable to load image'),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),

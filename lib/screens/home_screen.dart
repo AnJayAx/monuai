@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:ui' as ui;
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -18,7 +20,12 @@ class Country {
   final String code; // ISO2 lowercase e.g., 'sg', 'jp'
   final String? emoji; // Optional flag/emoji for fun UI
 
-  const Country({required this.name, required this.landmarks, required this.code, this.emoji});
+  const Country({
+    required this.name,
+    required this.landmarks,
+    required this.code,
+    this.emoji,
+  });
 }
 
 class _HomeScreenState extends State<HomeScreen> {
@@ -65,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } catch (_) {}
   }
+
   // Countries and their landmarks (can be moved to a separate data file later)
   final List<Country> _countries = const [
     Country(
@@ -82,12 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
       name: 'Japan',
       code: 'jp',
       emoji: '🇯🇵',
-      landmarks: [
-        'Himeji Castle',
-        'Kinkaku-ji',
-        'Tokyo Tower',
-        'Osaka Castle',
-      ],
+      landmarks: ['Himeji Castle', 'Kinkaku-ji', 'Tokyo Tower', 'Osaka Castle'],
     ),
     Country(
       name: 'France',
@@ -135,77 +138,136 @@ class _HomeScreenState extends State<HomeScreen> {
           itemBuilder: (context, index) {
             final country = _countries[index];
             return Card(
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              elevation: 2,
-              child: Theme(
-                data: Theme.of(context).copyWith(
-                  dividerColor: Colors.transparent,
-                ),
-                child: ExpansionTile(
-                tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                childrenPadding: const EdgeInsets.only(left: 16, right: 8, bottom: 12),
-                leading: CountryFlag.fromCountryCode(
-                  country.code,
-                  height: 20,
-                  width: 28,
-                  borderRadius: 4,
-                ),
-                title: Text(
-                  country.name,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                subtitle: Text('${_visitedCount(country)}/${country.landmarks.length} landmarks visited'),
+              child: Stack(
                 children: [
-                  ...country.landmarks.map(
-                    (lm) {
-                      final discovered = _discovered.contains(lm);
-                      return ListTile(
-                        dense: true,
-                        contentPadding: const EdgeInsets.only(left: 8, right: 8),
-                        leading: Icon(
-                          Icons.location_on_outlined,
-                          color: discovered ? Colors.green : null,
+                  // Background image with subtle blur and gradient overlay
+                  Positioned.fill(
+                    child: _CountryHeaderBackground(code: country.code),
+                  ),
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.black.withValues(alpha: 0.2),
+                            Theme.of(
+                              context,
+                            ).colorScheme.surface.withValues(alpha: 0.2),
+                          ],
                         ),
-                        title: Text(
-                          lm,
-                          style: TextStyle(
-                            color: discovered ? Colors.green[800] : null,
-                            fontWeight: discovered ? FontWeight.w600 : null,
-                          ),
+                      ),
+                    ),
+                  ),
+                  Theme(
+                    data: Theme.of(
+                      context,
+                    ).copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      tilePadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      childrenPadding: const EdgeInsets.only(
+                        left: 8,
+                        right: 8,
+                        bottom: 12,
+                      ),
+                      leading: CountryFlag.fromCountryCode(
+                        country.code,
+                        height: 20,
+                        width: 28,
+                        borderRadius: 4,
+                      ),
+                      title: Text(
+                        country.name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
                         ),
-                        subtitle: discovered && _capturedAt[lm] != null
-                            ? Text(
-                                'Captured on ${_formatTimestamp(_capturedAt[lm]!)}',
-                                style: TextStyle(color: Colors.green[700], fontSize: 12),
-                              )
-                            : null,
-                        trailing: discovered
-                            ? const Icon(Icons.check_circle, color: Colors.green)
-                            : null,
-                        tileColor: discovered ? Colors.green.withValues(alpha: 0.08) : null,
-                        onTap: () async {
-                          final path = _photoPaths[lm];
-                          if (discovered && path != null && path.isNotEmpty) {
-                            if (!mounted) return;
-                            await Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => LandmarkPhotoScreen(
-                                  landmark: lm,
-                                  imagePath: path,
+                      ),
+                      subtitle: Text(
+                        '${_visitedCount(country)}/${country.landmarks.length} landmarks visited',
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      children: [
+                        const SizedBox(height: 4),
+                        ...country.landmarks.map((lm) {
+                          final discovered = _discovered.contains(lm);
+                          return Card(
+                            elevation: 0,
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            color: discovered
+                                ? Colors.green.shade50
+                                : Theme.of(
+                                    context,
+                                  ).colorScheme.surface.withValues(alpha: 0.7),
+                            child: ListTile(
+                              dense: true,
+                              leading: Icon(
+                                Icons.location_on_outlined,
+                                color: discovered
+                                    ? Colors.green
+                                    : Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                              ),
+                              title: Text(
+                                lm,
+                                style: TextStyle(
+                                  color: discovered
+                                      ? Colors.green[800]
+                                      : Theme.of(context).colorScheme.onSurface,
+                                  fontWeight: discovered
+                                      ? FontWeight.w600
+                                      : null,
                                 ),
                               ),
-                            );
-                          } else {
-                            _onLandmarkTap(country.name, lm);
-                          }
-                          await _loadDiscovered();
-                        },
-                      );
-                    },
+                              subtitle: discovered && _capturedAt[lm] != null
+                                  ? Text(
+                                      'Captured on ${_formatTimestamp(_capturedAt[lm]!)}',
+                                      style: TextStyle(
+                                        color: Colors.green[700],
+                                        fontSize: 12,
+                                      ),
+                                    )
+                                  : null,
+                              trailing: discovered
+                                  ? const Icon(
+                                      Icons.check_circle,
+                                      color: Colors.green,
+                                    )
+                                  : null,
+                              onTap: () async {
+                                final path = _photoPaths[lm];
+                                if (discovered &&
+                                    path != null &&
+                                    path.isNotEmpty) {
+                                  if (!mounted) return;
+                                  await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => LandmarkPhotoScreen(
+                                        landmark: lm,
+                                        imagePath: path,
+                                      ),
+                                    ),
+                                  );
+                                } else {
+                                  _onLandmarkTap(country.name, lm);
+                                }
+                                await _loadDiscovered();
+                              },
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
                   ),
                 ],
-                ),
               ),
             );
           },
@@ -293,7 +355,7 @@ class _HomeScreenState extends State<HomeScreen> {
       await prefs.remove(_kPhotosKey);
       await prefs.remove(_kConfirmedKey);
       await prefs.remove(_kDescriptionsKey);
-  await prefs.remove(_kCapturedAtKey);
+      await prefs.remove(_kCapturedAtKey);
 
       await _loadDiscovered();
 
@@ -315,5 +377,50 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
+  }
+}
+
+class _CountryHeaderBackground extends StatelessWidget {
+  final String code;
+  const _CountryHeaderBackground({required this.code});
+
+  Future<String?> _resolveAssetPath() async {
+    try {
+      final manifest = await rootBundle.loadString('AssetManifest.json');
+      final Map<String, dynamic> map =
+          jsonDecode(manifest) as Map<String, dynamic>;
+      final prefix = 'assets/images/${code}_header';
+      for (final key in map.keys) {
+        if (key.startsWith(prefix)) return key; // matches any extension
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String?>(
+      future: _resolveAssetPath(),
+      builder: (context, snapshot) {
+        final path = snapshot.data;
+        if (path == null) {
+          return Container(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+          );
+        }
+        return ImageFiltered(
+          imageFilter: ui.ImageFilter.blur(sigmaX: 0.5, sigmaY: 0.5),
+          child: ShaderMask(
+            shaderCallback: (rect) => const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.transparent, Colors.black26],
+            ).createShader(rect),
+            blendMode: BlendMode.darken,
+            child: Image.asset(path, fit: BoxFit.cover),
+          ),
+        );
+      },
+    );
   }
 }
