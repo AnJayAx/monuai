@@ -4,6 +4,10 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'dart:async';
+import 'package:image/image.dart' as img;
+import 'dart:io';
 
 // Converts a CameraImage to a float32 Uint8List buffer for model input
 Uint8List cameraImageToFloat32List(
@@ -78,9 +82,11 @@ class _ScanScreenState extends State<ScanScreen> {
   String _notificationText = '';
 
   List<Detection> _detections = [];
-
-  double _confidenceThreshold = 0.7;
-  static const String _kConfidenceThresholdKey = 'confidence_threshold';
+  // Overlay threshold controls what boxes are drawn; discovery requires higher confidence
+  static const double _overlayThreshold = 0.7;
+  static const double _discoveryThreshold = 0.8;
+  static const String _kDiscoveredKey = 'discovered_landmarks';
+  static const String _kPhotosKey = 'landmark_photos';
 
   Interpreter? _interpreter;
 
@@ -91,28 +97,32 @@ class _ScanScreenState extends State<ScanScreen> {
     'Merlion',
   ];
 
+  // Persisted + session memory to avoid duplicate toasts
+  Set<String> _discovered = <String>{};
+  final Set<String> _sessionNotified = <String>{};
+  bool _isCapturing = false;
+  late void Function(CameraImage) _imageStreamHandler;
+
   @override
   void initState() {
     super.initState();
     _loadModel();
+    _imageStreamHandler = _onImageFromStream;
     _initializeCamera();
-    _loadConfidenceThreshold();
+    _loadDiscovered();
   }
 
-  Future<void> _loadConfidenceThreshold() async {
+  Future<void> _loadDiscovered() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final val = prefs.getDouble(_kConfidenceThresholdKey);
-      if (val != null && mounted) {
-        setState(() {
-          _confidenceThreshold = val;
-        });
-        debugPrint('Loaded confidence threshold: $_confidenceThreshold');
-      }
+      final list = prefs.getStringList(_kDiscoveredKey) ?? <String>[];
+      _discovered = list.toSet();
     } catch (e) {
-      debugPrint('Failed to load confidence threshold: $e');
+      debugPrint('Failed to load discovered landmarks: $e');
     }
   }
+
+  // Confidence threshold is fixed via constants; no user-configurable threshold.
 
   Future<void> _loadModel() async {
     try {
@@ -158,7 +168,7 @@ class _ScanScreenState extends State<ScanScreen> {
 
       _cameraController = CameraController(
         cameras[0],
-        ResolutionPreset.low,
+        ResolutionPreset.high,
         enableAudio: false,
       );
 
@@ -170,17 +180,19 @@ class _ScanScreenState extends State<ScanScreen> {
           _isCameraInitialized = true;
         });
 
-        _cameraController.startImageStream((CameraImage cameraImage) {
-          if (!_isProcessing && _modelLoaded) {
-            _isProcessing = true;
-            _runInference(cameraImage);
-          }
-        });
+        _cameraController.startImageStream(_imageStreamHandler);
       }
     } catch (e) {
       setState(() {
         debugPrint('Camera error: $e');
       });
+    }
+  }
+
+  void _onImageFromStream(CameraImage cameraImage) {
+    if (!_isProcessing && _modelLoaded && !_isCapturing) {
+      _isProcessing = true;
+      _runInference(cameraImage);
     }
   }
 
@@ -258,7 +270,7 @@ class _ScanScreenState extends State<ScanScreen> {
         }
       }
 
-      if (maxConfidence >= _confidenceThreshold) {
+      if (maxConfidence >= _overlayThreshold) {
         // Extract bounding box coordinates
         double xCenter = outputFloats[0 * 8400 + i];
         double yCenter = outputFloats[1 * 8400 + i];
@@ -302,7 +314,197 @@ class _ScanScreenState extends State<ScanScreen> {
           debugPrint('No landmark detected');
         }
       });
+
+      // Check for new landmarks and persist + notify once
+      _handleNewLandmarks(filteredDetections);
     }
+  }
+
+  Future<void> _handleNewLandmarks(List<Detection> detections) async {
+    if (detections.isEmpty) return;
+
+    // Compute max confidence per label in this frame
+    final Map<String, double> labelMax = {};
+    for (final d in detections) {
+      final cur = labelMax[d.label] ?? 0.0;
+      if (d.confidence > cur) labelMax[d.label] = d.confidence;
+    }
+    final List<String> newlyFound = [];
+
+    for (final e in labelMax.entries) {
+      if (e.value >= _discoveryThreshold && !_discovered.contains(e.key)) {
+        _discovered.add(e.key);
+        newlyFound.add(e.key);
+      }
+    }
+
+    if (newlyFound.isEmpty) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_kDiscoveredKey, _discovered.toList());
+    } catch (e) {
+      debugPrint('Failed to persist discovered landmarks: $e');
+    }
+
+    // Notify user only once per label per session; show the first new label prominently
+    final firstNew = newlyFound.firstWhere(
+      (l) => !_sessionNotified.contains(l),
+      orElse: () => newlyFound.first,
+    );
+    if (!_sessionNotified.contains(firstNew) && mounted) {
+      _sessionNotified.add(firstNew);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('New landmark detected: $firstNew'),
+          backgroundColor: Colors.green.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+
+    // Capture once and create per-landmark cropped images for all newly found labels in this frame
+    if (!_isCapturing) {
+      // Build best detection per newly found label (highest confidence)
+      final Map<String, Detection> best = {};
+      for (final d in detections) {
+        if (!newlyFound.contains(d.label)) continue;
+        final prev = best[d.label];
+        if (prev == null || d.confidence > prev.confidence) {
+          best[d.label] = d;
+        }
+      }
+      await _captureAndStoreCropsForLabels(best);
+    }
+  }
+
+  Future<void> _captureAndStoreCropsForLabels(Map<String, Detection> labelDetections) async {
+    if (!_isCameraInitialized) return;
+    if (_isCapturing) return;
+
+    _isCapturing = true;
+    try {
+      await _cameraController.stopImageStream();
+      final picture = await _cameraController.takePicture();
+      final photoPath = picture.path;
+
+      // Read image and prepare crops
+      img.Image? source;
+      try {
+        final bytes = await File(photoPath).readAsBytes();
+        source = img.decodeImage(bytes);
+      } catch (e) {
+        debugPrint('Failed to decode captured image: $e');
+      }
+
+      // Save path into map in SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final jsonStr = prefs.getString(_kPhotosKey);
+      Map<String, dynamic> map = <String, dynamic>{};
+      if (jsonStr != null) {
+        try {
+          map = jsonDecode(jsonStr) as Map<String, dynamic>;
+        } catch (_) {}
+      }
+
+      if (source != null) {
+        final srcW = source.width.toDouble();
+        final srcH = source.height.toDouble();
+        const modelSize = 640.0;
+        final sx = srcW / modelSize;
+        final sy = srcH / modelSize;
+
+        for (final entry in labelDetections.entries) {
+          final label = entry.key;
+          final det = entry.value;
+
+          // Compute crop rect in photo coordinates with 10% padding
+          double left = det.boundingBox.left * sx;
+          double top = det.boundingBox.top * sy;
+          double right = det.boundingBox.right * sx;
+          double bottom = det.boundingBox.bottom * sy;
+
+          final padX = ((right - left) * 0.1);
+          final padY = ((bottom - top) * 0.1);
+          left = (left - padX).clamp(0.0, srcW - 1);
+          top = (top - padY).clamp(0.0, srcH - 1);
+          right = (right + padX).clamp(1.0, srcW);
+          bottom = (bottom + padY).clamp(1.0, srcH);
+
+          int x = left.round();
+          int y = top.round();
+          int w = (right - left).round();
+          int h = (bottom - top).round();
+
+          // Ensure valid non-zero crop
+          if (w <= 0 || h <= 0) {
+            // Fallback to full photo for this label
+            final existing = map[label]?.toString();
+            if (existing == null || existing.isEmpty) {
+              map[label] = photoPath;
+            }
+            continue;
+          }
+
+          img.Image cropped;
+          try {
+            cropped = img.copyCrop(source, x: x, y: y, width: w, height: h);
+          } catch (e) {
+            debugPrint('Crop failed for $label: $e');
+            final existing = map[label]?.toString();
+            if (existing == null || existing.isEmpty) {
+              map[label] = photoPath;
+            }
+            continue;
+          }
+
+          final jpg = img.encodeJpg(cropped, quality: 90);
+          final dir = File(photoPath).parent.path;
+          final stamp = DateTime.now().millisecondsSinceEpoch;
+          final safe = _slugify(label);
+          final outPath = '$dir/${safe}_$stamp.jpg';
+          try {
+            await File(outPath).writeAsBytes(jpg, flush: true);
+            final existing = map[label]?.toString();
+            if (existing == null || existing.isEmpty) {
+              map[label] = outPath;
+            }
+          } catch (e) {
+            debugPrint('Failed to write crop for $label: $e');
+            final existing = map[label]?.toString();
+            if (existing == null || existing.isEmpty) {
+              map[label] = photoPath;
+            }
+          }
+        }
+      } else {
+        // Fallback: associate full photo with all labels
+        for (final label in labelDetections.keys) {
+          final existing = map[label]?.toString();
+          if (existing == null || existing.isEmpty) {
+            map[label] = photoPath;
+          }
+        }
+      }
+      await prefs.setString(_kPhotosKey, jsonEncode(map));
+    } catch (e) {
+      debugPrint('Failed to capture/store photo: $e');
+    } finally {
+      // Resume image stream
+      try {
+        await _cameraController.startImageStream(_imageStreamHandler);
+      } catch (e) {
+        debugPrint('Failed to restart image stream: $e');
+      }
+      _isCapturing = false;
+    }
+  }
+
+  String _slugify(String input) {
+    final lower = input.toLowerCase();
+    final replaced = lower.replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    return replaced.replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
   }
 
   // Computes Intersection over Union between two Rects
