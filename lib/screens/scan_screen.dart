@@ -78,8 +78,8 @@ class _ScanScreenState extends State<ScanScreen> {
   bool _isCameraInitialized = false;
   bool _modelLoaded = false;
   bool _isProcessing = false;
+  bool _isDisposed = false;
   int _frameCount = 0;
-  String _notificationText = '';
 
   List<Detection> _detections = [];
   // Overlay threshold controls what boxes are drawn; discovery requires higher confidence
@@ -190,13 +190,18 @@ class _ScanScreenState extends State<ScanScreen> {
   }
 
   void _onImageFromStream(CameraImage cameraImage) {
-    if (!_isProcessing && _modelLoaded && !_isCapturing) {
+    if (_isDisposed) return;
+    if (!_isProcessing && _modelLoaded && !_isCapturing && _interpreter != null) {
       _isProcessing = true;
       _runInference(cameraImage);
     }
   }
 
   Future<void> _runInference(CameraImage cameraImage) async {
+    if (_isDisposed || _interpreter == null) {
+      _isProcessing = false;
+      return;
+    }
     final stopwatchTotal = Stopwatch()..start();
 
     try {
@@ -217,7 +222,13 @@ class _ScanScreenState extends State<ScanScreen> {
       final Uint8List outputBuffer = Uint8List(1 * 8 * 8400 * 4);
 
       final stopwatchInference = Stopwatch()..start();
-      _interpreter?.run(inputBuffer, outputBuffer);
+      // Double-check interpreter is still valid before running
+      final localInterpreter = _interpreter;
+      if (_isDisposed || localInterpreter == null) {
+        _isProcessing = false;
+        return;
+      }
+      localInterpreter.run(inputBuffer, outputBuffer);
       stopwatchInference.stop();
       debugPrint('Inference: ${stopwatchInference.elapsedMilliseconds} ms');
 
@@ -233,20 +244,6 @@ class _ScanScreenState extends State<ScanScreen> {
     } finally {
       _isProcessing = false;
     }
-  }
-
-  void _updateNotification(List<Detection> detections) {
-    if (detections.isEmpty) {
-      _notificationText = '';
-      return;
-    }
-
-    // Find landmark with highest confidence
-    detections.sort((a, b) => b.confidence.compareTo(a.confidence));
-    final topDetection = detections.first;
-
-    _notificationText =
-        '${topDetection.label} ${(topDetection.confidence * 100).toStringAsFixed(0)}% confidence detected';
   }
 
   void _processOutput(Uint8List outputBuffer) {
@@ -304,8 +301,6 @@ class _ScanScreenState extends State<ScanScreen> {
     );
 
     if (mounted) {
-      _updateNotification(filteredDetections);
-
       setState(() {
         _detections = filteredDetections;
         if (filteredDetections.isNotEmpty) {
@@ -548,8 +543,20 @@ class _ScanScreenState extends State<ScanScreen> {
 
   @override
   void dispose() {
-    _cameraController.dispose();
-    _interpreter?.close();
+    _isDisposed = true;
+    // Stop image stream before disposing camera to avoid callbacks after resources are gone
+    try {
+      _cameraController.stopImageStream();
+    } catch (_) {}
+    _isCapturing = false;
+    _isProcessing = false;
+    try {
+      _cameraController.dispose();
+    } catch (_) {}
+    try {
+      _interpreter?.close();
+    } catch (_) {}
+    _interpreter = null;
     super.dispose();
   }
 
@@ -590,35 +597,47 @@ class _ScanScreenState extends State<ScanScreen> {
                               detections: _detections,
                             ),
                           ),
+                          if (!_modelLoaded)
+                            Align(
+                              alignment: Alignment.bottomCenter,
+                              child: Padding(
+                                padding: const EdgeInsets.only(bottom: 24.0),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.6),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: const [
+                                      SizedBox(
+                                        height: 16,
+                                        width: 16,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                      ),
+                                      SizedBox(width: 8),
+                                      Text('Loading model...', style: TextStyle(color: Colors.white)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
                   ),
                 ),
-                Positioned(
-                  top: 40,
-                  left: 16,
-                  right: 16,
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      _notificationText,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
               ],
             )
-          : const Center(child: CircularProgressIndicator()),
+          : Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: const [
+                Center(child: CircularProgressIndicator()),
+                SizedBox(height: 12),
+                Text('Initializing camera...', style: TextStyle(fontSize: 16)),
+              ],
+            ),
     );
   }
 }

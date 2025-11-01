@@ -60,6 +60,7 @@ flutter:
   assets:
     - assets/models/best_float32.tflite # YOLOv11n 640
     - assets/labels.txt
+    - assets/landmark_descriptions.json
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
