@@ -113,7 +113,7 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
                             ),
                           ),
                         ),
-                        // Foreground image contained
+                        // Foreground image fills box so small detections aren't tiny
                         Center(
                           child: Padding(
                             padding: const EdgeInsets.all(6.0),
@@ -121,7 +121,7 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
                               borderRadius: BorderRadius.circular(6),
                               child: Image.file(
                                 File(_imagePath),
-                                fit: BoxFit.contain,
+                                fit: BoxFit.cover,
                                 errorBuilder: (context, error, stack) => const Center(
                                   child: Text('Unable to load image'),
                                 ),

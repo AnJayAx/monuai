@@ -38,7 +38,7 @@ class _RecaptureScreenState extends State<RecaptureScreen> {
       );
       _controller = controller;
       _initFuture = controller.initialize();
-      setState(() {});
+      if (mounted) setState(() {});
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
