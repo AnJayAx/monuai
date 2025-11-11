@@ -38,7 +38,9 @@ class MyApp extends StatelessWidget {
         cardTheme: CardThemeData(
           elevation: 3,
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
           clipBehavior: Clip.antiAlias,
         ),
         bottomNavigationBarTheme: BottomNavigationBarThemeData(
