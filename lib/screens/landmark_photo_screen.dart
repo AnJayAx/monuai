@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/upload_service.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'recapture_screen.dart';
 
@@ -37,7 +39,7 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
     super.initState();
     _imagePath = widget.imagePath;
     _loadConfirmedState();
-  _loadDescriptions();
+    _loadDescriptions();
   }
 
   Future<void> _loadConfirmedState() async {
@@ -54,9 +56,13 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
       // Load asset defaults once
       if (_assetDescriptions.isEmpty) {
         try {
-          final assetStr = await rootBundle.loadString('assets/landmark_descriptions.json');
+          final assetStr = await rootBundle.loadString(
+            'assets/landmark_descriptions.json',
+          );
           final Map<String, dynamic> assetMap = jsonDecode(assetStr);
-          _assetDescriptions = assetMap.map((k, v) => MapEntry(k.toString(), v?.toString() ?? ''));
+          _assetDescriptions = assetMap.map(
+            (k, v) => MapEntry(k.toString(), v?.toString() ?? ''),
+          );
         } catch (_) {
           _assetDescriptions = const {};
         }
@@ -77,10 +83,7 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.landmark),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: Text(widget.landmark), centerTitle: true),
       body: SafeArea(
         child: Column(
           children: [
@@ -91,7 +94,9 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
                 width: 320,
                 height: 320,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                  color: theme.colorScheme.surfaceContainerHighest.withValues(
+                    alpha: 0.3,
+                  ),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: theme.dividerColor),
                 ),
@@ -106,7 +111,10 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
                         // Subtle blurred backdrop using the same image
                         Positioned.fill(
                           child: ImageFiltered(
-                            imageFilter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                            imageFilter: ui.ImageFilter.blur(
+                              sigmaX: 8,
+                              sigmaY: 8,
+                            ),
                             child: Image.file(
                               File(_imagePath),
                               fit: BoxFit.cover,
@@ -122,9 +130,10 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
                               child: Image.file(
                                 File(_imagePath),
                                 fit: BoxFit.cover,
-                                errorBuilder: (context, error, stack) => const Center(
-                                  child: Text('Unable to load image'),
-                                ),
+                                errorBuilder: (context, error, stack) =>
+                                    const Center(
+                                      child: Text('Unable to load image'),
+                                    ),
                               ),
                             ),
                           ),
@@ -146,11 +155,16 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
                   decoration: BoxDecoration(
                     color: Colors.green.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.green.withValues(alpha: 0.4)),
+                    border: Border.all(
+                      color: Colors.green.withValues(alpha: 0.4),
+                    ),
                   ),
                   child: const Text(
                     'Landmark Confirmed',
-                    style: TextStyle(fontWeight: FontWeight.w600, color: Colors.green),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.green,
+                    ),
                   ),
                 ),
               ),
@@ -166,10 +180,18 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
                           backgroundColor: theme.colorScheme.error,
                           foregroundColor: theme.colorScheme.onError,
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
                         child: _working
-                            ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
                             : const Text('Incorrect'),
                       ),
                     ),
@@ -179,10 +201,18 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
                         onPressed: _working ? null : _onConfirmPressed,
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
                         child: _working
-                            ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
                             : const Text('Confirm'),
                       ),
                     ),
@@ -192,7 +222,9 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
                         onPressed: _working ? null : _onRecapturePressed,
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
                         child: const Text('Recapture'),
                       ),
@@ -208,7 +240,9 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
                 children: [
                   Text(
                     'Description',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   _buildDescriptionWidget(),
@@ -241,8 +275,8 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
         await prefs.setStringList(_kConfirmedKey, confirmed);
       }
       // Ensure photo mapping is saved
-  final photoMap = await _readPhotoMap(prefs);
-  photoMap[widget.landmark] = _imagePath;
+      final photoMap = await _readPhotoMap(prefs);
+      photoMap[widget.landmark] = _imagePath;
       await prefs.setString(_kPhotosKey, jsonEncode(photoMap));
 
       // Save/Update captured timestamp
@@ -251,21 +285,88 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
       await prefs.setString(_kCapturedAtKey, jsonEncode(capturedMap));
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Landmark confirmed')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Landmark confirmed')));
+        // Log to terminal for debugging confirmation step
+        debugPrint('[Confirm] landmark="${widget.landmark}" path="$_imagePath"');
         setState(() {
           _isConfirmed = true;
         });
       }
+
+      // Fire-and-forget upload to admin if configured
+      unawaited(_uploadConfirmedImageIfConfigured());
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to confirm: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to confirm: $e')));
       }
     } finally {
       if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _uploadConfirmedImageIfConfigured() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      var url = prefs.getString('server_upload_url');
+      if (url == null || url.trim().isEmpty) {
+        // Provide a sensible default: Android emulator uses 10.0.2.2
+        if (Platform.isAndroid) {
+          url = 'http://10.0.2.2:5000/upload';
+        } else {
+          url = 'http://127.0.0.1:5000/upload';
+        }
+        debugPrint('[Upload] server_upload_url not set, using default: $url');
+      }
+
+      final uri = Uri.parse(url);
+      final file = File(_imagePath);
+
+      // Use capturedAt saved in prefs if present
+      final capturedMap = await _readCapturedMap(prefs);
+      final capturedStr = capturedMap[widget.landmark];
+      final capturedAt = capturedStr != null
+          ? DateTime.tryParse(capturedStr) ?? DateTime.now().toUtc()
+          : DateTime.now().toUtc();
+
+      // Pre-upload log with file size best-effort
+      int? size;
+      try { size = await file.length(); } catch (_) {}
+      debugPrint('[Upload] start url=$uri landmark="${widget.landmark}" capturedAt=$capturedAt fileSize=${size ?? 'unknown'}');
+
+      final result = await UploadService.uploadImage(
+        uploadUrl: uri,
+        file: file,
+        landmark: widget.landmark,
+        capturedAt: capturedAt,
+      );
+
+      if (!mounted) return;
+      final bodyPreview = (result.body ?? '').trim();
+      final shortened = bodyPreview.length > 300 ? bodyPreview.substring(0, 300) + '…' : bodyPreview;
+      debugPrint('[Upload] done ok=${result.ok} status=${result.statusCode} bodyPreview="$shortened"');
+      if (result.ok) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Uploaded to admin')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Upload failed (${result.statusCode}): ${result.body ?? ''}',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[Upload] error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Upload error: $e')));
     }
   }
 
@@ -275,7 +376,9 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete this progress?'),
-        content: const Text('This will remove the detected landmark and delete the image.'),
+        content: const Text(
+          'This will remove the detected landmark and delete the image.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -311,10 +414,10 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
       photoMap.remove(widget.landmark);
       await prefs.setString(_kPhotosKey, jsonEncode(photoMap));
 
-  // Remove captured timestamp
-  final capturedMap = await _readCapturedMap(prefs);
-  capturedMap.remove(widget.landmark);
-  await prefs.setString(_kCapturedAtKey, jsonEncode(capturedMap));
+      // Remove captured timestamp
+      final capturedMap = await _readCapturedMap(prefs);
+      capturedMap.remove(widget.landmark);
+      await prefs.setString(_kCapturedAtKey, jsonEncode(capturedMap));
 
       // Best-effort delete file
       try {
@@ -335,9 +438,9 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to update: $e')));
       }
     } finally {
       if (mounted) setState(() => _working = false);
@@ -373,10 +476,10 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
       photoMap[widget.landmark] = result;
       await prefs.setString(_kPhotosKey, jsonEncode(photoMap));
 
-  // Update captured timestamp on recapture
-  final capturedMap = await _readCapturedMap(prefs);
-  capturedMap[widget.landmark] = DateTime.now().toUtc().toIso8601String();
-  await prefs.setString(_kCapturedAtKey, jsonEncode(capturedMap));
+      // Update captured timestamp on recapture
+      final capturedMap = await _readCapturedMap(prefs);
+      capturedMap[widget.landmark] = DateTime.now().toUtc().toIso8601String();
+      await prefs.setString(_kCapturedAtKey, jsonEncode(capturedMap));
 
       if (prev != null && prev.isNotEmpty && prev != result) {
         try {
@@ -389,15 +492,15 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
         setState(() {
           _imagePath = result;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Photo updated')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Photo updated')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update photo: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to update photo: $e')));
       }
     } finally {
       if (mounted) setState(() => _working = false);
@@ -421,8 +524,10 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
         : 'No description available for ${widget.landmark}.';
 
     final baseStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.8),
-        );
+      color: Theme.of(
+        context,
+      ).textTheme.bodyMedium?.color?.withValues(alpha: 0.8),
+    );
     final boldStyle = baseStyle?.copyWith(fontWeight: FontWeight.w700);
 
     // Simple markdown-like parser for **bold** segments
@@ -436,7 +541,9 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
 
     for (final m in matches) {
       if (m.start > start) {
-        spans.add(TextSpan(text: text.substring(start, m.start), style: baseStyle));
+        spans.add(
+          TextSpan(text: text.substring(start, m.start), style: baseStyle),
+        );
       }
       spans.add(TextSpan(text: m.group(1) ?? '', style: boldStyle));
       start = m.end;
@@ -445,6 +552,8 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
       spans.add(TextSpan(text: text.substring(start), style: baseStyle));
     }
 
-    return RichText(text: TextSpan(children: spans, style: baseStyle));
+    return RichText(
+      text: TextSpan(children: spans, style: baseStyle),
+    );
   }
 }

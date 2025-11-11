@@ -25,9 +25,9 @@ class _RecaptureScreenState extends State<RecaptureScreen> {
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No camera found')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No camera found')));
         Navigator.of(context).pop();
         return;
       }
@@ -41,9 +41,9 @@ class _RecaptureScreenState extends State<RecaptureScreen> {
       if (mounted) setState(() {});
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Camera error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Camera error: $e')));
       Navigator.of(context).pop();
     }
   }
@@ -66,9 +66,9 @@ class _RecaptureScreenState extends State<RecaptureScreen> {
       Navigator.of(context).pop<String>(picture.path);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Capture failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Capture failed: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -111,7 +111,9 @@ class _RecaptureScreenState extends State<RecaptureScreen> {
               label: Text(_busy ? 'Capturing…' : 'Capture'),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
             ),
           ),

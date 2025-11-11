@@ -156,7 +156,9 @@ class _ScanScreenState extends State<ScanScreen> {
         });
         debugPrint('✓ Model loaded with GPU acceleration');
       } else {
-        _interpreter = await Interpreter.fromAsset('assets/models/best_float32.tflite');
+        _interpreter = await Interpreter.fromAsset(
+          'assets/models/best_float32.tflite',
+        );
         setState(() {
           _modelLoaded = true;
           debugPrint('✓ Model loaded (CPU)');
@@ -215,7 +217,10 @@ class _ScanScreenState extends State<ScanScreen> {
 
   void _onImageFromStream(CameraImage cameraImage) {
     if (_isDisposed) return;
-    if (!_isProcessing && _modelLoaded && !_isCapturing && _interpreter != null) {
+    if (!_isProcessing &&
+        _modelLoaded &&
+        !_isCapturing &&
+        _interpreter != null) {
       _isProcessing = true;
       _runInference(cameraImage);
     }
@@ -256,7 +261,7 @@ class _ScanScreenState extends State<ScanScreen> {
       stopwatchInference.stop();
       debugPrint('Inference: ${stopwatchInference.elapsedMilliseconds} ms');
 
-  _processOutput(outputBuffer);
+      _processOutput(outputBuffer);
 
       stopwatchTotal.stop();
       debugPrint(
@@ -398,7 +403,9 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
-  Future<void> _captureAndStoreCropsForLabels(Map<String, Detection> labelDetections) async {
+  Future<void> _captureAndStoreCropsForLabels(
+    Map<String, Detection> labelDetections,
+  ) async {
     if (!_isCameraInitialized) return;
     if (_isCapturing) return;
 
@@ -523,7 +530,9 @@ class _ScanScreenState extends State<ScanScreen> {
   String _slugify(String input) {
     final lower = input.toLowerCase();
     final replaced = lower.replaceAll(RegExp(r'[^a-z0-9]+'), '_');
-    return replaced.replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
+    return replaced
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
   }
 
   // Computes Intersection over Union between two Rects
@@ -623,7 +632,9 @@ class _ScanScreenState extends State<ScanScreen> {
                                   CustomPaint(
                                     painter: BoundingBoxPainter(
                                       detections: _detections,
-                                      color: Theme.of(context).colorScheme.primary,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.primary,
                                     ),
                                   ),
                                 // Guidance chip
@@ -634,14 +645,22 @@ class _ScanScreenState extends State<ScanScreen> {
                                   child: Align(
                                     alignment: Alignment.topCenter,
                                     child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 8,
+                                      ),
                                       decoration: BoxDecoration(
-                                        color: Colors.black.withValues(alpha: 0.35),
+                                        color: Colors.black.withValues(
+                                          alpha: 0.35,
+                                        ),
                                         borderRadius: BorderRadius.circular(24),
                                       ),
                                       child: const Text(
                                         'Align the landmark within the frame',
-                                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -650,12 +669,22 @@ class _ScanScreenState extends State<ScanScreen> {
                                   Align(
                                     alignment: Alignment.bottomCenter,
                                     child: Padding(
-                                      padding: const EdgeInsets.only(bottom: 24.0),
+                                      padding: const EdgeInsets.only(
+                                        bottom: 24.0,
+                                      ),
                                       child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
+                                        ),
                                         decoration: BoxDecoration(
-                                          color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.8),
-                                          borderRadius: BorderRadius.circular(12),
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .surface
+                                              .withValues(alpha: 0.8),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                         ),
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
@@ -663,7 +692,9 @@ class _ScanScreenState extends State<ScanScreen> {
                                             SizedBox(
                                               height: 16,
                                               width: 16,
-                                              child: CircularProgressIndicator(strokeWidth: 2),
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
                                             ),
                                             SizedBox(width: 8),
                                             Text('Loading model...'),
@@ -696,7 +727,8 @@ class _ScanScreenState extends State<ScanScreen> {
                               value: _showBoxes,
                               onChanged: (v) async {
                                 setState(() => _showBoxes = v);
-                                final prefs = await SharedPreferences.getInstance();
+                                final prefs =
+                                    await SharedPreferences.getInstance();
                                 await prefs.setBool(_kPrefShowBoxes, v);
                               },
                             ),
@@ -708,7 +740,8 @@ class _ScanScreenState extends State<ScanScreen> {
                               value: _notifyOnDetection,
                               onChanged: (v) async {
                                 setState(() => _notifyOnDetection = v);
-                                final prefs = await SharedPreferences.getInstance();
+                                final prefs =
+                                    await SharedPreferences.getInstance();
                                 await prefs.setBool(_kPrefNotify, v);
                               },
                             ),
@@ -766,10 +799,10 @@ class BoundingBoxPainter extends CustomPainter {
         detection.boundingBox.bottom * scale,
       );
 
-  // Shadow outline for readability
-  final rrect = RRect.fromRectXY(rect, 8, 8);
-  canvas.drawRRect(rrect, shadow);
-  canvas.drawRRect(rrect, paint);
+      // Shadow outline for readability
+      final rrect = RRect.fromRectXY(rect, 8, 8);
+      canvas.drawRRect(rrect, shadow);
+      canvas.drawRRect(rrect, paint);
 
       final labelText =
           '${detection.label} ${(detection.confidence * 100).toStringAsFixed(0)}%';
