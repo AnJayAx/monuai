@@ -147,7 +147,7 @@ class _ScanScreenState extends State<ScanScreen> {
       if (_useGpu) {
         final gpuOptions = InterpreterOptions()..addDelegate(GpuDelegateV2());
         _interpreter = await Interpreter.fromAsset(
-          'assets/models/best_float32.tflite',
+          'assets/models/model_fp32_student.tflite',
           options: gpuOptions,
         );
         setState(() {
@@ -157,7 +157,7 @@ class _ScanScreenState extends State<ScanScreen> {
         debugPrint('✓ Model loaded with GPU acceleration');
       } else {
         _interpreter = await Interpreter.fromAsset(
-          'assets/models/best_float32.tflite',
+          'assets/models/model_fp32_student.tflite',
         );
         setState(() {
           _modelLoaded = true;
@@ -168,7 +168,7 @@ class _ScanScreenState extends State<ScanScreen> {
       debugPrint('GPU failed, trying CPU: $e');
       try {
         _interpreter = await Interpreter.fromAsset(
-          'assets/models/best_float32.tflite',
+          'assets/models/model_fp32_student.tflite',
         );
         setState(() {
           _modelLoaded = true;
