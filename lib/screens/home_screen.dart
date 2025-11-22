@@ -9,6 +9,7 @@ import 'package:country_flags/country_flags.dart';
 import 'leaderboard_screen.dart';
 import 'fortune_wheel_screen.dart';
 import 'coupons_screen.dart';
+import 'achievements_screen.dart';
 import '../models/gamification_models.dart';
 import '../services/gamification_service.dart';
 
@@ -386,6 +387,48 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           const SizedBox(height: 8),
+          // Achievements button
+          GestureDetector(
+            onTap: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const AchievementsScreen(),
+                ),
+              );
+              await _loadUserStats();
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF6A1B9A), Color(0xFF8E24AA)],
+                ),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.purple.withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.emoji_events, color: Colors.white, size: 24),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Achievements (${stats.unlockedAchievements.length}/${GamificationService.achievements.length})',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
