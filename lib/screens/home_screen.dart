@@ -6,6 +6,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'landmark_photo_screen.dart';
 import 'package:country_flags/country_flags.dart';
+import 'leaderboard_screen.dart';
+import 'fortune_wheel_screen.dart';
+import 'coupons_screen.dart';
+import '../models/gamification_models.dart';
+import '../services/gamification_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -37,11 +42,22 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<String> _discovered = <String>{};
   Map<String, String> _photoPaths = <String, String>{};
   Map<String, String> _capturedAt = <String, String>{};
+  UserStats? _userStats;
 
   @override
   void initState() {
     super.initState();
     _loadDiscovered();
+    _loadUserStats();
+  }
+
+  Future<void> _loadUserStats() async {
+    final stats = await GamificationService.loadUserStats();
+    final updatedStats = await GamificationService.updateStreak(stats);
+    if (!mounted) return;
+    setState(() {
+      _userStats = updatedStats;
+    });
   }
 
   Future<void> _loadDiscovered() async {
@@ -131,147 +147,392 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadDiscovered,
-        child: ListView.builder(
+        onRefresh: () async {
+          await _loadDiscovered();
+          await _loadUserStats();
+        },
+        child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
-          itemCount: _countries.length,
-          itemBuilder: (context, index) {
-            final country = _countries[index];
-            return Card(
-              child: Stack(
-                children: [
-                  // Background image with subtle blur and gradient overlay
-                  Positioned.fill(
-                    child: _CountryHeaderBackground(code: country.code),
-                  ),
-                  Positioned.fill(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: 0.2),
-                            Theme.of(
-                              context,
-                            ).colorScheme.surface.withValues(alpha: 0.2),
-                          ],
+          slivers: [
+            // Gamification header
+            if (_userStats != null)
+              SliverToBoxAdapter(
+                child: _buildGamificationHeader(),
+              ),
+            // Countries list
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final country = _countries[index];
+                  return _buildCountryCard(country);
+                },
+                childCount: _countries.length,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGamificationHeader() {
+    final stats = _userStats!;
+    final leaderboardRank = _getLeaderboardRank(stats);
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Welcome message
+          Text(
+            'Welcome back!',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[700],
+                ),
+          ),
+          const SizedBox(height: 12),
+          // Stats cards row
+          Row(
+            children: [
+              Expanded(
+                child: _StatsCard(
+                  icon: Icons.stars,
+                  label: 'Points',
+                  value: '${stats.points}',
+                  color: Colors.green,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _StatsCard(
+                  icon: Icons.emoji_events,
+                  label: 'Rank',
+                  value: '#$leaderboardRank',
+                  color: Colors.amber,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const LeaderboardScreen(),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _StatsCard(
+                  icon: Icons.explore,
+                  label: 'Total Landmarks',
+                  value: '${stats.totalLandmarksVisited}',
+                  color: Colors.blue,
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Statistics dashboard coming soon!'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Level and XP bar
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.purple.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.purple.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.military_tech, color: Colors.purple[700], size: 20),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Level ${stats.level}',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.purple[700],
+                          ),
                         ),
+                      ],
+                    ),
+                    Text(
+                      '${stats.xp} / ${stats.xpToNextLevel} XP',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: stats.levelProgress,
+                    minHeight: 8,
+                    backgroundColor: Colors.grey[300],
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[600]!),
                   ),
-                  Theme(
-                    data: Theme.of(
-                      context,
-                    ).copyWith(dividerColor: Colors.transparent),
-                    child: ExpansionTile(
-                      tilePadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Action buttons row
+          Row(
+            children: [
+              // Fortune wheel button
+              Expanded(
+                child: GestureDetector(
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const FortuneWheelScreen(),
                       ),
-                      childrenPadding: const EdgeInsets.only(
-                        left: 8,
-                        right: 8,
-                        bottom: 12,
+                    );
+                    await _loadUserStats();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF4A90E2), Color(0xFF5856D6)],
                       ),
-                      leading: CountryFlag.fromCountryCode(
-                        country.code,
-                        height: 20,
-                        width: 28,
-                        borderRadius: 4,
-                      ),
-                      title: Text(
-                        country.name,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.blue.withValues(alpha: 0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
                         ),
-                      ),
-                      subtitle: Text(
-                        '${_visitedCount(country)}/${country.landmarks.length} landmarks visited',
-                        style: const TextStyle(color: Colors.white70),
-                      ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const SizedBox(height: 4),
-                        ...country.landmarks.map((lm) {
-                          final discovered = _discovered.contains(lm);
-                          return Card(
-                            elevation: 0,
-                            margin: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            color: discovered
-                                ? Colors.green.shade50
-                                : Theme.of(
-                                    context,
-                                  ).colorScheme.surface.withValues(alpha: 0.7),
-                            child: ListTile(
-                              dense: true,
-                              leading: Icon(
-                                Icons.location_on_outlined,
-                                color: discovered
-                                    ? Colors.green
-                                    : Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
-                              ),
-                              title: Text(
-                                lm,
-                                style: TextStyle(
-                                  color: discovered
-                                      ? Colors.green[800]
-                                      : Theme.of(context).colorScheme.onSurface,
-                                  fontWeight: discovered
-                                      ? FontWeight.w600
-                                      : null,
-                                ),
-                              ),
-                              subtitle: discovered && _capturedAt[lm] != null
-                                  ? Text(
-                                      'Captured on ${_formatTimestamp(_capturedAt[lm]!)}',
-                                      style: TextStyle(
-                                        color: Colors.green[700],
-                                        fontSize: 12,
-                                      ),
-                                    )
-                                  : null,
-                              trailing: discovered
-                                  ? const Icon(
-                                      Icons.check_circle,
-                                      color: Colors.green,
-                                    )
-                                  : null,
-                              onTap: () async {
-                                final path = _photoPaths[lm];
-                                if (discovered &&
-                                    path != null &&
-                                    path.isNotEmpty) {
-                                  if (!mounted) return;
-                                  await Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => LandmarkPhotoScreen(
-                                        landmark: lm,
-                                        imagePath: path,
-                                      ),
-                                    ),
-                                  );
-                                } else {
-                                  _onLandmarkTap(country.name, lm);
-                                }
-                                await _loadDiscovered();
-                              },
-                            ),
-                          );
-                        }),
+                        const Icon(Icons.casino, color: Colors.white, size: 24),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Spin (${stats.fortuneWheelSpinsRemaining})',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                ],
+                ),
               ),
-            );
-          },
-        ),
+              const SizedBox(width: 8),
+              // Coupons button
+              Expanded(
+                child: GestureDetector(
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const CouponsScreen(),
+                      ),
+                    );
+                    await _loadUserStats();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFFFF6B6B), Color(0xFFFF8E53)],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.red.withValues(alpha: 0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.local_offer, color: Colors.white, size: 24),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Coupons (${stats.collectedCoupons.length})',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  int _getLeaderboardRank(UserStats stats) {
+    final leaderboard = GamificationService.getMockLeaderboard(stats);
+    for (int i = 0; i < leaderboard.length; i++) {
+      if (leaderboard[i]['isCurrentUser'] == true) {
+        return i + 1;
+      }
+    }
+    return leaderboard.length;
+  }
+
+  Widget _buildCountryCard(Country country) {
+    return Card(
+      child: Stack(
+        children: [
+          // Background image with subtle blur and gradient overlay
+          Positioned.fill(
+            child: _CountryHeaderBackground(code: country.code),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.2),
+                    Theme.of(
+                      context,
+                    ).colorScheme.surface.withValues(alpha: 0.2),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Theme(
+            data: Theme.of(
+              context,
+            ).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              tilePadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 14,
+              ),
+              childrenPadding: const EdgeInsets.only(
+                left: 8,
+                right: 8,
+                bottom: 12,
+              ),
+              leading: CountryFlag.fromCountryCode(
+                country.code,
+                height: 20,
+                width: 28,
+                borderRadius: 4,
+              ),
+              title: Text(
+                country.name,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                ),
+              ),
+              subtitle: Text(
+                '${_visitedCount(country)}/${country.landmarks.length} landmarks visited',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              children: [
+                const SizedBox(height: 4),
+                ...country.landmarks.map((lm) {
+                  final discovered = _discovered.contains(lm);
+                  return Card(
+                    elevation: 0,
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    color: discovered
+                        ? Colors.green.shade50
+                        : Theme.of(
+                            context,
+                          ).colorScheme.surface.withValues(alpha: 0.7),
+                    child: ListTile(
+                      dense: true,
+                      leading: Icon(
+                        Icons.location_on_outlined,
+                        color: discovered
+                            ? Colors.green
+                            : Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                      ),
+                      title: Text(
+                        lm,
+                        style: TextStyle(
+                          color: discovered
+                              ? Colors.green[800]
+                              : Theme.of(context).colorScheme.onSurface,
+                          fontWeight: discovered
+                              ? FontWeight.w600
+                              : null,
+                        ),
+                      ),
+                      subtitle: discovered && _capturedAt[lm] != null
+                          ? Text(
+                              'Captured on ${_formatTimestamp(_capturedAt[lm]!)}',
+                              style: TextStyle(
+                                color: Colors.green[700],
+                                fontSize: 12,
+                              ),
+                            )
+                          : null,
+                      trailing: discovered
+                          ? const Icon(
+                              Icons.check_circle,
+                              color: Colors.green,
+                            )
+                          : null,
+                      onTap: () async {
+                        final path = _photoPaths[lm];
+                        if (discovered &&
+                            path != null &&
+                            path.isNotEmpty) {
+                          if (!mounted) return;
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => LandmarkPhotoScreen(
+                                landmark: lm,
+                                imagePath: path,
+                              ),
+                            ),
+                          );
+                        } else {
+                          _onLandmarkTap(country.name, lm);
+                        }
+                        await _loadDiscovered();
+                      },
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -309,9 +570,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Reset detected progress?'),
+        title: const Text('Reset All Progress?'),
         content: const Text(
-          'This will delete all visited progress and any stored photos associated with detected landmarks. This action cannot be undone.',
+          'This will delete all detected landmarks, photos, points, coupons, and other collected data. This action cannot be undone.',
         ),
         actions: [
           TextButton(
@@ -321,7 +582,7 @@ class _HomeScreenState extends State<HomeScreen> {
           FilledButton.tonal(
             style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
+            child: const Text('Delete All'),
           ),
         ],
       ),
@@ -351,18 +612,23 @@ class _HomeScreenState extends State<HomeScreen> {
         } catch (_) {}
       }
 
+      // Remove landmark data
       await prefs.remove(_kDiscoveredKey);
       await prefs.remove(_kPhotosKey);
       await prefs.remove(_kConfirmedKey);
       await prefs.remove(_kDescriptionsKey);
       await prefs.remove(_kCapturedAtKey);
+      
+      // Remove gamification data (using hardcoded key since it's private)
+      await prefs.remove('user_stats');
 
       await _loadDiscovered();
+      await _loadUserStats();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('All detected progress has been cleared.'),
+          content: Text('All progress, points, and coupons have been cleared.'),
           behavior: SnackBarBehavior.floating,
           duration: Duration(seconds: 2),
         ),
@@ -421,6 +687,60 @@ class _CountryHeaderBackground extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _StatsCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+  final VoidCallback? onTap;
+
+  const _StatsCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey[600],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

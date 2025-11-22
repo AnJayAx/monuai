@@ -8,6 +8,7 @@ import 'dart:async';
 import 'package:image/image.dart' as img;
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/gamification_service.dart';
 
 // Converts a CameraImage to a float32 Uint8List buffer for model input
 Uint8List cameraImageToFloat32List(
@@ -91,7 +92,7 @@ class _ScanScreenState extends State<ScanScreen> {
 
   List<Detection> _detections = [];
   // Overlay threshold controls what boxes are drawn; discovery requires higher confidence
-  static const double _overlayThreshold = 0.7;
+  static const double _overlayThreshold = 0.85;
   static const double _discoveryThreshold = 0.8;
   static const String _kDiscoveredKey = 'discovered_landmarks';
   static const String _kPhotosKey = 'landmark_photos';
@@ -367,6 +368,13 @@ class _ScanScreenState extends State<ScanScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setStringList(_kDiscoveredKey, _discovered.toList());
+      
+      // Award points for discovering landmarks
+      final userStats = await GamificationService.loadUserStats();
+      var updatedStats = userStats;
+      for (int i = 0; i < newlyFound.length; i++) {
+        updatedStats = await GamificationService.recordLandmarkVisit(updatedStats);
+      }
     } catch (e) {
       debugPrint('Failed to persist discovered landmarks: $e');
     }

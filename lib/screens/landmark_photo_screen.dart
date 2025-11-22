@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/upload_service.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'recapture_screen.dart';
+import '../services/gamification_service.dart';
 
 class LandmarkPhotoScreen extends StatefulWidget {
   final String landmark;
@@ -346,12 +347,19 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
 
       if (!mounted) return;
       final bodyPreview = (result.body ?? '').trim();
-      final shortened = bodyPreview.length > 300 ? bodyPreview.substring(0, 300) + '…' : bodyPreview;
+      final shortened = bodyPreview.length > 300 ? '${bodyPreview.substring(0, 300)}…' : bodyPreview;
       debugPrint('[Upload] done ok=${result.ok} status=${result.statusCode} bodyPreview="$shortened"');
       if (result.ok) {
+        // Award points for photo upload
+        try {
+          final userStats = await GamificationService.loadUserStats();
+          await GamificationService.recordPhotoUpload(userStats);
+        } catch (_) {}
+        
+        if (!mounted) return;
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Uploaded to admin')));
+        ).showSnackBar(const SnackBar(content: Text('Uploaded to admin +25 points!')));
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
