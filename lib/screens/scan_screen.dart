@@ -425,7 +425,7 @@ class _ScanScreenState extends State<ScanScreen> {
       });
     }
 
-    // Capture once and create per-landmark cropped images for all newly found labels in this frame
+    // Capture once and save full image with bounding boxes for all newly found labels
     if (!_isCapturing) {
       // Build best detection per newly found label (highest confidence)
       final Map<String, Detection> best = {};
@@ -436,11 +436,11 @@ class _ScanScreenState extends State<ScanScreen> {
           best[d.label] = d;
         }
       }
-      await _captureAndStoreCropsForLabels(best);
+      await _captureAndSaveWithBoundingBoxes(best);
     }
   }
 
-  Future<void> _captureAndStoreCropsForLabels(
+  Future<void> _captureAndSaveWithBoundingBoxes(
     Map<String, Detection> labelDetections,
   ) async {
     if (!_isCameraInitialized) return;
@@ -452,7 +452,7 @@ class _ScanScreenState extends State<ScanScreen> {
       final picture = await _cameraController.takePicture();
       final photoPath = picture.path;
 
-      // Read image and prepare crops
+      // Read and decode image
       img.Image? source;
       try {
         final bytes = await File(photoPath).readAsBytes();
@@ -460,6 +460,17 @@ class _ScanScreenState extends State<ScanScreen> {
       } catch (e) {
         debugPrint('Failed to decode captured image: $e');
       }
+
+      if (source == null) {
+        _isCapturing = false;
+        return;
+      }
+
+      final srcW = source.width.toDouble();
+      final srcH = source.height.toDouble();
+      const modelSize = 640.0;
+      final sx = srcW / modelSize;
+      final sy = srcH / modelSize;
 
       // Save path into map in SharedPreferences
       final prefs = await SharedPreferences.getInstance();
@@ -471,88 +482,95 @@ class _ScanScreenState extends State<ScanScreen> {
         } catch (_) {}
       }
 
-      if (source != null) {
-        final srcW = source.width.toDouble();
-        final srcH = source.height.toDouble();
-        const modelSize = 640.0;
-        final sx = srcW / modelSize;
-        final sy = srcH / modelSize;
+      final dir = File(photoPath).parent.path;
+      final stamp = DateTime.now().millisecondsSinceEpoch;
 
-        for (final entry in labelDetections.entries) {
-          final label = entry.key;
-          final det = entry.value;
+      // Create separate annotated image for EACH newly detected landmark
+      for (final entry in labelDetections.entries) {
+        final label = entry.key;
+        final det = entry.value;
 
-          // Compute crop rect in photo coordinates with 10% padding
-          double left = det.boundingBox.left * sx;
-          double top = det.boundingBox.top * sy;
-          double right = det.boundingBox.right * sx;
-          double bottom = det.boundingBox.bottom * sy;
+        // Clone the source image for this landmark
+        final landmarkImage = img.Image.from(source);
 
-          final padX = ((right - left) * 0.1);
-          final padY = ((bottom - top) * 0.1);
-          left = (left - padX).clamp(0.0, srcW - 1);
-          top = (top - padY).clamp(0.0, srcH - 1);
-          right = (right + padX).clamp(1.0, srcW);
-          bottom = (bottom + padY).clamp(1.0, srcH);
+        // Scale bounding box coordinates to image size
+        final left = (det.boundingBox.left * sx).round();
+        final top = (det.boundingBox.top * sy).round();
+        final right = (det.boundingBox.right * sx).round();
+        final bottom = (det.boundingBox.bottom * sy).round();
 
-          int x = left.round();
-          int y = top.round();
-          int w = (right - left).round();
-          int h = (bottom - top).round();
+        // Draw bounding box rectangle (only for this landmark)
+        final boxColor = img.ColorRgb8(76, 175, 80); // Green color
+        img.drawRect(
+          landmarkImage,
+          x1: left,
+          y1: top,
+          x2: right,
+          y2: bottom,
+          color: boxColor,
+          thickness: 4,
+        );
 
-          // Ensure valid non-zero crop
-          if (w <= 0 || h <= 0) {
-            // Fallback to full photo for this label
-            final existing = map[label]?.toString();
-            if (existing == null || existing.isEmpty) {
-              map[label] = photoPath;
-            }
-            continue;
-          }
+        // Draw label background
+        final labelText = '$label ${(det.confidence * 100).toStringAsFixed(0)}%';
+        final labelHeight = 30;
+        final labelWidth = labelText.length * 12;
+        
+        // Draw label background rectangle
+        img.fillRect(
+          landmarkImage,
+          x1: left,
+          y1: math.max(0, top - labelHeight),
+          x2: left + labelWidth,
+          y2: top,
+          color: boxColor,
+        );
 
-          img.Image cropped;
-          try {
-            cropped = img.copyCrop(source, x: x, y: y, width: w, height: h);
-          } catch (e) {
-            debugPrint('Crop failed for $label: $e');
-            final existing = map[label]?.toString();
-            if (existing == null || existing.isEmpty) {
-              map[label] = photoPath;
-            }
-            continue;
-          }
+        // Draw label text
+        img.drawString(
+          landmarkImage,
+          labelText,
+          font: img.arial24,
+          x: left + 5,
+          y: math.max(0, top - labelHeight + 5),
+          color: img.ColorRgb8(255, 255, 255),
+        );
 
-          final jpg = img.encodeJpg(cropped, quality: 90);
-          final dir = File(photoPath).parent.path;
-          final stamp = DateTime.now().millisecondsSinceEpoch;
-          final safe = _slugify(label);
-          final outPath = '$dir/${safe}_$stamp.jpg';
-          try {
-            await File(outPath).writeAsBytes(jpg, flush: true);
-            final existing = map[label]?.toString();
-            if (existing == null || existing.isEmpty) {
-              map[label] = outPath;
-            }
-          } catch (e) {
-            debugPrint('Failed to write crop for $label: $e');
-            final existing = map[label]?.toString();
-            if (existing == null || existing.isEmpty) {
-              map[label] = photoPath;
-            }
-          }
-        }
-      } else {
-        // Fallback: associate full photo with all labels
-        for (final label in labelDetections.keys) {
-          final existing = map[label]?.toString();
-          if (existing == null || existing.isEmpty) {
-            map[label] = photoPath;
-          }
+        // Save this landmark's annotated image
+        final jpg = img.encodeJpg(landmarkImage, quality: 95);
+        final safe = _slugify(label);
+        final outPath = '$dir/${safe}_annotated_$stamp.jpg';
+        try {
+          await File(outPath).writeAsBytes(jpg, flush: true);
+          map[label] = outPath;
+        } catch (e) {
+          debugPrint('Failed to write annotated image for $label: $e');
         }
       }
+
       await prefs.setString(_kPhotosKey, jsonEncode(map));
+
+      // Auto-confirm the landmarks and save capture timestamps
+      final confirmed = prefs.getStringList('confirmed_landmarks') ?? <String>[];
+      final capturedAtJson = prefs.getString('landmark_captured_at');
+      Map<String, dynamic> capturedMap = {};
+      if (capturedAtJson != null) {
+        try {
+          capturedMap = jsonDecode(capturedAtJson) as Map<String, dynamic>;
+        } catch (_) {}
+      }
+
+      for (final label in labelDetections.keys) {
+        if (!confirmed.contains(label)) {
+          confirmed.add(label);
+        }
+        capturedMap[label] = DateTime.now().toUtc().toIso8601String();
+      }
+
+      await prefs.setStringList('confirmed_landmarks', confirmed);
+      await prefs.setString('landmark_captured_at', jsonEncode(capturedMap));
     } catch (e) {
-      debugPrint('Failed to capture/store photo: $e');
+      debugPrint('Failed to capture/save photo: $e');
     } finally {
       // Resume image stream
       try {

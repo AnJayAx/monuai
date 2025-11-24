@@ -86,176 +86,118 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(widget.landmark), centerTitle: true),
       body: SafeArea(
-        child: Column(
-          children: [
-            const SizedBox(height: 16),
-            // Fixed-size image area
-            Center(
-              child: Container(
-                width: 320,
-                height: 320,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest.withValues(
-                    alpha: 0.3,
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              const SizedBox(height: 16),
+              // Fixed-size image area
+              Center(
+                child: Container(
+                  width: 320,
+                  height: 320,
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest.withValues(
+                      alpha: 0.3,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: theme.dividerColor),
                   ),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: theme.dividerColor),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        // Subtle blurred backdrop using the same image
-                        Positioned.fill(
-                          child: ImageFiltered(
-                            imageFilter: ui.ImageFilter.blur(
-                              sigmaX: 8,
-                              sigmaY: 8,
-                            ),
-                            child: Image.file(
-                              File(_imagePath),
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                        ),
-                        // Foreground image fills box so small detections aren't tiny
-                        Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(6.0),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
+                  clipBehavior: Clip.antiAlias,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          // Subtle blurred backdrop using the same image
+                          Positioned.fill(
+                            child: ImageFiltered(
+                              imageFilter: ui.ImageFilter.blur(
+                                sigmaX: 8,
+                                sigmaY: 8,
+                              ),
                               child: Image.file(
                                 File(_imagePath),
                                 fit: BoxFit.cover,
-                                errorBuilder: (context, error, stack) =>
-                                    const Center(
-                                      child: Text('Unable to load image'),
-                                    ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
+                          // Foreground image fills box so small detections aren't tiny
+                          Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(6.0),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(6),
+                                child: Image.file(
+                                  File(_imagePath),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stack) =>
+                                      const Center(
+                                        child: Text('Unable to load image'),
+                                      ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            if (_isConfirmed)
+              const SizedBox(height: 16),
+              // Status display - show auto-confirmation message
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
                 child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
                   decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.15),
+                    color: Colors.green.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: Colors.green.withValues(alpha: 0.4),
-                    ),
+                    border: Border.all(color: Colors.green, width: 2),
                   ),
-                  child: const Text(
-                    'Landmark Confirmed',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: Colors.green,
-                    ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.green, size: 24),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Landmark Auto-Captured & Confirmed',
+                          style: TextStyle(
+                            color: Colors.green,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-            if (!_isConfirmed)
+              const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: _working ? null : _onWrongPressed,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: theme.colorScheme.error,
-                          foregroundColor: theme.colorScheme.onError,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                        child: _working
-                            ? const SizedBox(
-                                height: 18,
-                                width: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text('Incorrect'),
+                    Text(
+                      'Description',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: _working ? null : _onConfirmPressed,
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                        child: _working
-                            ? const SizedBox(
-                                height: 18,
-                                width: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Text('Confirm'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: _working ? null : _onRecapturePressed,
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                        child: const Text('Recapture'),
-                      ),
-                    ),
+                    const SizedBox(height: 6),
+                    _buildDescriptionWidget(),
                   ],
                 ),
               ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Description',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  _buildDescriptionWidget(),
-                ],
-              ),
-            ),
-            // Spacer to push buttons to bottom if content is short
-            const Spacer(),
-          ],
+              const SizedBox(height: 16),
+            ],
+          ),
         ),
       ),
-      bottomNavigationBar: null,
     );
   }
 
