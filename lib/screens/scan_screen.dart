@@ -111,6 +111,7 @@ class _ScanScreenState extends State<ScanScreen> {
   final Set<String> _sessionNotified = <String>{};
   bool _isCapturing = false;
   late void Function(CameraImage) _imageStreamHandler;
+  Map<String, String> _landmarkDescriptions = {};
 
   @override
   void initState() {
@@ -119,6 +120,7 @@ class _ScanScreenState extends State<ScanScreen> {
     _imageStreamHandler = _onImageFromStream;
     _initializeCamera();
     _loadDiscovered();
+    _loadLandmarkDescriptions();
   }
 
   Future<void> _loadPrefs() async {
@@ -138,6 +140,19 @@ class _ScanScreenState extends State<ScanScreen> {
       _discovered = list.toSet();
     } catch (e) {
       debugPrint('Failed to load discovered landmarks: $e');
+    }
+  }
+
+  Future<void> _loadLandmarkDescriptions() async {
+    try {
+      final String jsonString = await DefaultAssetBundle.of(context)
+          .loadString('assets/landmark_descriptions.json');
+      final Map<String, dynamic> decoded = json.decode(jsonString);
+      setState(() {
+        _landmarkDescriptions = decoded.map((key, value) => MapEntry(key, value.toString()));
+      });
+    } catch (e) {
+      debugPrint('Failed to load landmark descriptions: $e');
     }
   }
 
@@ -640,6 +655,7 @@ class _ScanScreenState extends State<ScanScreen> {
                                   CustomPaint(
                                     painter: BoundingBoxPainter(
                                       detections: _detections,
+                                      descriptions: _landmarkDescriptions,
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.primary,
@@ -776,8 +792,13 @@ class _ScanScreenState extends State<ScanScreen> {
 class BoundingBoxPainter extends CustomPainter {
   final List<Detection> detections;
   final Color? color;
+  final Map<String, String> descriptions;
 
-  BoundingBoxPainter({required this.detections, this.color});
+  BoundingBoxPainter({
+    required this.detections,
+    this.color,
+    this.descriptions = const {},
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -836,6 +857,64 @@ class BoundingBoxPainter extends CustomPainter {
         canvas,
         Offset(rect.left + 4, math.max(0, rect.top - 18)),
       );
+
+      // Draw description beside the bounding box
+      final description = descriptions[detection.label];
+      if (description != null && description.isNotEmpty) {
+        // Extract just the description part (after "**Description:**")
+        String shortDesc = description;
+        if (description.contains('**Description:**')) {
+          final parts = description.split('**Description:**');
+          if (parts.length > 1) {
+            shortDesc = parts[1].trim();
+          }
+        }
+        // Limit to first 100 characters
+        if (shortDesc.length > 100) {
+          shortDesc = '${shortDesc.substring(0, 97)}...';
+        }
+
+        final descTextPainter = TextPainter(
+          textDirection: TextDirection.ltr,
+          textAlign: TextAlign.left,
+          maxLines: 3,
+        );
+
+        descTextPainter.text = TextSpan(
+          text: shortDesc,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 11,
+            fontWeight: FontWeight.normal,
+            height: 1.2,
+          ),
+        );
+        descTextPainter.layout(maxWidth: 200);
+
+        // Position description to the right of the box
+        final descLeft = rect.right + 8;
+        final descTop = rect.top;
+
+        // Background for description
+        final descRect = Rect.fromLTWH(
+          descLeft,
+          descTop,
+          descTextPainter.width + 12,
+          descTextPainter.height + 8,
+        );
+
+        // Semi-transparent background
+        canvas.drawRRect(
+          RRect.fromRectXY(descRect, 8, 8),
+          Paint()..color = Colors.black.withValues(alpha: 0.75),
+        );
+
+        // Draw description text
+        descTextPainter.paint(
+          canvas,
+          Offset(descLeft + 6, descTop + 4),
+        );
+      }
     }
   }
 
