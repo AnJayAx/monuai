@@ -5,8 +5,6 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'dart:async';
-import 'package:image/image.dart' as img;
-import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/gamification_service.dart';
 
@@ -167,16 +165,21 @@ class _ScanScreenState extends State<ScanScreen> {
   Future<void> _loadModel() async {
     try {
       if (_useGpu) {
-        final gpuOptions = InterpreterOptions()..addDelegate(GpuDelegateV2());
+        final gpuOptions = InterpreterOptions()
+          ..addDelegate(GpuDelegateV2(
+            options: GpuDelegateOptionsV2(
+              isPrecisionLossAllowed: true, // Allow FP16 for faster inference
+            ),
+          ))
+          ..threads = 4; // Use multiple threads for CPU fallback
         _interpreter = await Interpreter.fromAsset(
           'assets/models/model_fp32_student.tflite',
           options: gpuOptions,
         );
         setState(() {
           _modelLoaded = true;
-          debugPrint('✓ Model loaded with GPU acceleration');
         });
-        debugPrint('✓ Model loaded with GPU acceleration');
+        debugPrint('✓ Model loaded with GPU acceleration (optimized)');
       } else {
         _interpreter = await Interpreter.fromAsset(
           'assets/models/model_fp32_student.tflite',
@@ -425,24 +428,13 @@ class _ScanScreenState extends State<ScanScreen> {
       });
     }
 
-    // Capture once and save full image with bounding boxes for all newly found labels
+    // Capture once and save original image (no bounding boxes) for all newly found labels
     if (!_isCapturing) {
-      // Build best detection per newly found label (highest confidence)
-      final Map<String, Detection> best = {};
-      for (final d in detections) {
-        if (!newlyFound.contains(d.label)) continue;
-        final prev = best[d.label];
-        if (prev == null || d.confidence > prev.confidence) {
-          best[d.label] = d;
-        }
-      }
-      await _captureAndSaveWithBoundingBoxes(best);
+      await _captureAndSaveOriginal(newlyFound);
     }
   }
 
-  Future<void> _captureAndSaveWithBoundingBoxes(
-    Map<String, Detection> labelDetections,
-  ) async {
+  Future<void> _captureAndSaveOriginal(List<String> newLabels) async {
     if (!_isCameraInitialized) return;
     if (_isCapturing) return;
 
@@ -451,26 +443,6 @@ class _ScanScreenState extends State<ScanScreen> {
       await _cameraController.stopImageStream();
       final picture = await _cameraController.takePicture();
       final photoPath = picture.path;
-
-      // Read and decode image
-      img.Image? source;
-      try {
-        final bytes = await File(photoPath).readAsBytes();
-        source = img.decodeImage(bytes);
-      } catch (e) {
-        debugPrint('Failed to decode captured image: $e');
-      }
-
-      if (source == null) {
-        _isCapturing = false;
-        return;
-      }
-
-      final srcW = source.width.toDouble();
-      final srcH = source.height.toDouble();
-      const modelSize = 640.0;
-      final sx = srcW / modelSize;
-      final sy = srcH / modelSize;
 
       // Save path into map in SharedPreferences
       final prefs = await SharedPreferences.getInstance();
@@ -482,70 +454,9 @@ class _ScanScreenState extends State<ScanScreen> {
         } catch (_) {}
       }
 
-      final dir = File(photoPath).parent.path;
-      final stamp = DateTime.now().millisecondsSinceEpoch;
-
-      // Create separate annotated image for EACH newly detected landmark
-      for (final entry in labelDetections.entries) {
-        final label = entry.key;
-        final det = entry.value;
-
-        // Clone the source image for this landmark
-        final landmarkImage = img.Image.from(source);
-
-        // Scale bounding box coordinates to image size
-        final left = (det.boundingBox.left * sx).round();
-        final top = (det.boundingBox.top * sy).round();
-        final right = (det.boundingBox.right * sx).round();
-        final bottom = (det.boundingBox.bottom * sy).round();
-
-        // Draw bounding box rectangle (only for this landmark)
-        final boxColor = img.ColorRgb8(76, 175, 80); // Green color
-        img.drawRect(
-          landmarkImage,
-          x1: left,
-          y1: top,
-          x2: right,
-          y2: bottom,
-          color: boxColor,
-          thickness: 4,
-        );
-
-        // Draw label background
-        final labelText = '$label ${(det.confidence * 100).toStringAsFixed(0)}%';
-        final labelHeight = 30;
-        final labelWidth = labelText.length * 12;
-        
-        // Draw label background rectangle
-        img.fillRect(
-          landmarkImage,
-          x1: left,
-          y1: math.max(0, top - labelHeight),
-          x2: left + labelWidth,
-          y2: top,
-          color: boxColor,
-        );
-
-        // Draw label text
-        img.drawString(
-          landmarkImage,
-          labelText,
-          font: img.arial24,
-          x: left + 5,
-          y: math.max(0, top - labelHeight + 5),
-          color: img.ColorRgb8(255, 255, 255),
-        );
-
-        // Save this landmark's annotated image
-        final jpg = img.encodeJpg(landmarkImage, quality: 95);
-        final safe = _slugify(label);
-        final outPath = '$dir/${safe}_annotated_$stamp.jpg';
-        try {
-          await File(outPath).writeAsBytes(jpg, flush: true);
-          map[label] = outPath;
-        } catch (e) {
-          debugPrint('Failed to write annotated image for $label: $e');
-        }
+      // Save same original photo path for all newly detected landmarks
+      for (final label in newLabels) {
+        map[label] = photoPath;
       }
 
       await prefs.setString(_kPhotosKey, jsonEncode(map));
@@ -560,7 +471,7 @@ class _ScanScreenState extends State<ScanScreen> {
         } catch (_) {}
       }
 
-      for (final label in labelDetections.keys) {
+      for (final label in newLabels) {
         if (!confirmed.contains(label)) {
           confirmed.add(label);
         }
@@ -569,6 +480,8 @@ class _ScanScreenState extends State<ScanScreen> {
 
       await prefs.setStringList('confirmed_landmarks', confirmed);
       await prefs.setString('landmark_captured_at', jsonEncode(capturedMap));
+      
+      debugPrint('Saved original photo for ${newLabels.length} landmark(s)');
     } catch (e) {
       debugPrint('Failed to capture/save photo: $e');
     } finally {
@@ -580,14 +493,6 @@ class _ScanScreenState extends State<ScanScreen> {
       }
       _isCapturing = false;
     }
-  }
-
-  String _slugify(String input) {
-    final lower = input.toLowerCase();
-    final replaced = lower.replaceAll(RegExp(r'[^a-z0-9]+'), '_');
-    return replaced
-        .replaceAll(RegExp(r'_+'), '_')
-        .replaceAll(RegExp(r'^_|_$'), '');
   }
 
   // Computes Intersection over Union between two Rects

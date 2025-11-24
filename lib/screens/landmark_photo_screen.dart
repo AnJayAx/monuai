@@ -2,12 +2,29 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/upload_service.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'recapture_screen.dart';
 import '../services/gamification_service.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:image/image.dart' as img;
+import 'dart:math' as math;
+
+// Detection class for model output
+class _Detection {
+  final Rect boundingBox;
+  final String label;
+  final double confidence;
+
+  _Detection({
+    required this.boundingBox,
+    required this.label,
+    required this.confidence,
+  });
+}
 
 class LandmarkPhotoScreen extends StatefulWidget {
   final String landmark;
@@ -33,7 +50,11 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
   bool _isConfirmed = false;
   String _description = '';
   late String _imagePath;
+  String? _annotatedImagePath;
   Map<String, String> _assetDescriptions = const {};
+  bool _isProcessing = false;
+  Interpreter? _interpreter;
+  List<String> _landmarkNames = [];
 
   @override
   void initState() {
@@ -41,6 +62,13 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
     _imagePath = widget.imagePath;
     _loadConfirmedState();
     _loadDescriptions();
+    _loadModelAndPredict();
+  }
+
+  @override
+  void dispose() {
+    _interpreter?.close();
+    super.dispose();
   }
 
   Future<void> _loadConfirmedState() async {
@@ -77,6 +105,197 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
       setState(() {
         _description = '';
       });
+    }
+  }
+
+  Future<void> _loadModelAndPredict() async {
+    setState(() => _isProcessing = true);
+    
+    try {
+      // Load landmark names
+      final labelsData = await rootBundle.loadString('assets/labels.txt');
+      _landmarkNames = labelsData.split('\n').where((l) => l.isNotEmpty).toList();
+      
+      // Load TFLite model with GPU
+      final gpuOptions = InterpreterOptions()
+        ..addDelegate(GpuDelegateV2(
+          options: GpuDelegateOptionsV2(
+            isPrecisionLossAllowed: true,
+          ),
+        ));
+      _interpreter = await Interpreter.fromAsset(
+        'assets/models/model_fp32_student.tflite',
+        options: gpuOptions,
+      );
+      
+      debugPrint('Model loaded in landmark_photo_screen');
+      
+      // Run prediction on the original image
+      await _predictAndDrawBoundingBox();
+    } catch (e) {
+      debugPrint('Failed to load model or predict: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessing = false);
+      }
+    }
+  }
+
+  Future<void> _predictAndDrawBoundingBox() async {
+    if (_interpreter == null) return;
+    
+    try {
+      // Load and decode the original image
+      final bytes = await File(_imagePath).readAsBytes();
+      final source = img.decodeImage(bytes);
+      if (source == null) {
+        debugPrint('Failed to decode image');
+        return;
+      }
+      
+      // Resize image to 640x640 for model input
+      final resized = img.copyResize(source, width: 640, height: 640);
+      
+      // Convert to Float32List (grayscale)
+      final inputBuffer = Float32List(640 * 640 * 3);
+      int index = 0;
+      for (int y = 0; y < 640; y++) {
+        for (int x = 0; x < 640; x++) {
+          final pixel = resized.getPixel(x, y);
+          final gray = (pixel.r + pixel.g + pixel.b) / 3.0 / 255.0;
+          inputBuffer[index++] = gray;
+          inputBuffer[index++] = gray;
+          inputBuffer[index++] = gray;
+        }
+      }
+      
+      // Run inference
+      final outputBuffer = Uint8List(1 * 8 * 8400 * 4);
+      _interpreter!.run(inputBuffer.buffer.asUint8List(), outputBuffer);
+      
+      // Parse output
+      final outputFloats = Float32List.view(outputBuffer.buffer);
+      final detections = <_Detection>[];
+      
+      for (int i = 0; i < 8400; i++) {
+        double maxConfidence = 0.0;
+        int detectedClass = 0;
+        
+        for (int cls = 4; cls < 8; cls++) {
+          final confidence = outputFloats[cls * 8400 + i];
+          if (confidence > maxConfidence) {
+            maxConfidence = confidence;
+            detectedClass = cls - 4;
+          }
+        }
+        
+        if (maxConfidence >= 0.5) {
+          final xCenter = outputFloats[0 * 8400 + i];
+          final yCenter = outputFloats[1 * 8400 + i];
+          final width = outputFloats[2 * 8400 + i];
+          final height = outputFloats[3 * 8400 + i];
+          
+          final left = (xCenter - width / 2) * 640;
+          final top = (yCenter - height / 2) * 640;
+          final right = (xCenter + width / 2) * 640;
+          final bottom = (yCenter + height / 2) * 640;
+          
+          detections.add(_Detection(
+            boundingBox: Rect.fromLTRB(
+              left.clamp(0, 640),
+              top.clamp(0, 640),
+              right.clamp(0, 640),
+              bottom.clamp(0, 640),
+            ),
+            label: _landmarkNames[detectedClass],
+            confidence: maxConfidence,
+          ));
+        }
+      }
+      
+      // Find detection for this landmark
+      final targetDetection = detections.firstWhere(
+        (d) => d.label == widget.landmark,
+        orElse: () => detections.isNotEmpty ? detections.first : _Detection(
+          boundingBox: const Rect.fromLTRB(100, 100, 540, 540),
+          label: widget.landmark,
+          confidence: 0.0,
+        ),
+      );
+      
+      // Draw bounding box on the image
+      await _drawBoundingBoxOnImage(source, targetDetection);
+    } catch (e) {
+      debugPrint('Prediction error: $e');
+    }
+  }
+
+  Future<void> _drawBoundingBoxOnImage(img.Image source, _Detection detection) async {
+    try {
+      final annotated = img.Image.from(source);
+      
+      // Scale coordinates from 640x640 to actual image size
+      final srcW = source.width.toDouble();
+      final srcH = source.height.toDouble();
+      const modelSize = 640.0;
+      final sx = srcW / modelSize;
+      final sy = srcH / modelSize;
+      
+      final left = (detection.boundingBox.left * sx).round();
+      final top = (detection.boundingBox.top * sy).round();
+      final right = (detection.boundingBox.right * sx).round();
+      final bottom = (detection.boundingBox.bottom * sy).round();
+      
+      // Draw green bounding box
+      final boxColor = img.ColorRgb8(76, 175, 80);
+      img.drawRect(
+        annotated,
+        x1: left,
+        y1: top,
+        x2: right,
+        y2: bottom,
+        color: boxColor,
+        thickness: 4,
+      );
+      
+      // Draw label
+      final labelText = '${detection.label} ${(detection.confidence * 100).toStringAsFixed(0)}%';
+      final labelHeight = 30;
+      final labelWidth = labelText.length * 12;
+      
+      img.fillRect(
+        annotated,
+        x1: left,
+        y1: math.max(0, top - labelHeight),
+        x2: left + labelWidth,
+        y2: top,
+        color: boxColor,
+      );
+      
+      img.drawString(
+        annotated,
+        labelText,
+        font: img.arial24,
+        x: left + 5,
+        y: math.max(0, top - labelHeight + 5),
+        color: img.ColorRgb8(255, 255, 255),
+      );
+      
+      // Save annotated image to temp location
+      final jpg = img.encodeJpg(annotated, quality: 95);
+      final dir = File(_imagePath).parent.path;
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final annotatedPath = '$dir/temp_annotated_$stamp.jpg';
+      await File(annotatedPath).writeAsBytes(jpg, flush: true);
+      
+      if (mounted) {
+        setState(() {
+          _annotatedImagePath = annotatedPath;
+        });
+        debugPrint('Bounding box drawn and saved to: $annotatedPath');
+      }
+    } catch (e) {
+      debugPrint('Failed to draw bounding box: $e');
     }
   }
 
@@ -129,14 +348,28 @@ class _LandmarkPhotoScreenState extends State<LandmarkPhotoScreen> {
                               padding: const EdgeInsets.all(6.0),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(6),
-                                child: Image.file(
-                                  File(_imagePath),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stack) =>
-                                      const Center(
-                                        child: Text('Unable to load image'),
+                                child: _isProcessing
+                                  ? const Center(
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          CircularProgressIndicator(),
+                                          SizedBox(height: 12),
+                                          Text(
+                                            'Detecting landmark...',
+                                            style: TextStyle(color: Colors.white70),
+                                          ),
+                                        ],
                                       ),
-                                ),
+                                    )
+                                  : Image.file(
+                                      File(_annotatedImagePath ?? _imagePath),
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stack) =>
+                                          const Center(
+                                            child: Text('Unable to load image'),
+                                          ),
+                                    ),
                               ),
                             ),
                           ),
