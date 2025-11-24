@@ -24,7 +24,7 @@ class _CouponsScreenState extends State<CouponsScreen> {
   Future<void> _loadCoupons() async {
     setState(() => _isLoading = true);
     final stats = await GamificationService.loadUserStats();
-    final coupons = await GamificationService.getCoupons(stats);
+    final coupons = GamificationService.getCoupons(stats);
     setState(() {
       _userStats = stats;
       _coupons = coupons;

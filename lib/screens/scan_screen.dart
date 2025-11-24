@@ -84,11 +84,16 @@ class _ScanScreenState extends State<ScanScreen> {
   // Preferences
   static const String _kPrefUseGpu = 'use_gpu_delegate';
   static const String _kPrefShowBoxes = 'show_boxes';
+  static const String _kPrefShowDescriptions = 'show_descriptions';
   static const String _kPrefNotify = 'notify_on_detection';
   bool _useGpu = true;
   bool _showBoxes = true;
+  bool _showDescriptions = true;
   bool _notifyOnDetection = true;
   final int _frameStride = 15;
+
+  String? _lastDetectedLandmark;
+  DateTime? _lastDetectionTime;
 
   List<Detection> _detections = [];
   // Overlay threshold controls what boxes are drawn; discovery requires higher confidence
@@ -128,6 +133,7 @@ class _ScanScreenState extends State<ScanScreen> {
       final prefs = await SharedPreferences.getInstance();
       _useGpu = prefs.getBool(_kPrefUseGpu) ?? true;
       _showBoxes = prefs.getBool(_kPrefShowBoxes) ?? true;
+      _showDescriptions = prefs.getBool(_kPrefShowDescriptions) ?? true;
       _notifyOnDetection = prefs.getBool(_kPrefNotify) ?? true;
       if (mounted) setState(() {});
     } catch (_) {}
@@ -401,14 +407,22 @@ class _ScanScreenState extends State<ScanScreen> {
     );
     if (_notifyOnDetection && !_sessionNotified.contains(firstNew) && mounted) {
       _sessionNotified.add(firstNew);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('New landmark detected: $firstNew'),
-          backgroundColor: Theme.of(context).colorScheme.primary,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      setState(() {
+        _lastDetectedLandmark = firstNew;
+        _lastDetectionTime = DateTime.now();
+      });
+      // Auto-hide after 3 seconds
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted && _lastDetectionTime != null) {
+          final elapsed = DateTime.now().difference(_lastDetectionTime!);
+          if (elapsed.inSeconds >= 3) {
+            setState(() {
+              _lastDetectedLandmark = null;
+              _lastDetectionTime = null;
+            });
+          }
+        }
+      });
     }
 
     // Capture once and create per-landmark cropped images for all newly found labels in this frame
@@ -655,15 +669,59 @@ class _ScanScreenState extends State<ScanScreen> {
                                   CustomPaint(
                                     painter: BoundingBoxPainter(
                                       detections: _detections,
-                                      descriptions: _landmarkDescriptions,
+                                      descriptions: _showDescriptions ? _landmarkDescriptions : {},
                                       color: Theme.of(
                                         context,
                                       ).colorScheme.primary,
                                     ),
                                   ),
+                                // Notification banner for new detections
+                                if (_lastDetectedLandmark != null)
+                                  Positioned(
+                                    top: 12,
+                                    left: 12,
+                                    right: 12,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 12,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context).colorScheme.primary,
+                                        borderRadius: BorderRadius.circular(12),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.3),
+                                            blurRadius: 8,
+                                            offset: const Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          const Icon(
+                                            Icons.check_circle,
+                                            color: Colors.white,
+                                            size: 24,
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Text(
+                                              'New landmark detected: $_lastDetectedLandmark',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
                                 // Guidance chip
                                 Positioned(
-                                  top: 12,
+                                  top: _lastDetectedLandmark != null ? 76 : 12,
                                   left: 12,
                                   right: 12,
                                   child: Align(
@@ -740,38 +798,16 @@ class _ScanScreenState extends State<ScanScreen> {
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
                   child: Card(
                     elevation: 1,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: SwitchListTile.adaptive(
-                              dense: true,
-                              title: const Text('Show boxes'),
-                              value: _showBoxes,
-                              onChanged: (v) async {
-                                setState(() => _showBoxes = v);
-                                final prefs =
-                                    await SharedPreferences.getInstance();
-                                await prefs.setBool(_kPrefShowBoxes, v);
-                              },
-                            ),
-                          ),
-                          Expanded(
-                            child: SwitchListTile.adaptive(
-                              dense: true,
-                              title: const Text('Notify New Detection'),
-                              value: _notifyOnDetection,
-                              onChanged: (v) async {
-                                setState(() => _notifyOnDetection = v);
-                                final prefs =
-                                    await SharedPreferences.getInstance();
-                                await prefs.setBool(_kPrefNotify, v);
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
+                    child: SwitchListTile.adaptive(
+                      dense: true,
+                      title: const Text('Show Descriptions'),
+                      subtitle: const Text('Display landmark info beside bounding boxes'),
+                      value: _showDescriptions,
+                      onChanged: (v) async {
+                        setState(() => _showDescriptions = v);
+                        final prefs = await SharedPreferences.getInstance();
+                        await prefs.setBool(_kPrefShowDescriptions, v);
+                      },
                     ),
                   ),
                 ),
@@ -819,6 +855,9 @@ class BoundingBoxPainter extends CustomPainter {
     );
 
     final scale = size.width / 640.0;
+    
+    // Track occupied regions to avoid overlaps
+    final List<Rect> occupiedRegions = [];
 
     for (var detection in detections) {
       final rect = Rect.fromLTRB(
@@ -827,6 +866,9 @@ class BoundingBoxPainter extends CustomPainter {
         detection.boundingBox.right * scale,
         detection.boundingBox.bottom * scale,
       );
+
+      // Add bounding box to occupied regions
+      occupiedRegions.add(rect);
 
       // Shadow outline for readability
       final rrect = RRect.fromRectXY(rect, 8, 8);
@@ -857,64 +899,120 @@ class BoundingBoxPainter extends CustomPainter {
         canvas,
         Offset(rect.left + 4, math.max(0, rect.top - 18)),
       );
+    }
 
-      // Draw description beside the bounding box
+    // Second pass: draw descriptions with smart positioning
+    for (var detection in detections) {
       final description = descriptions[detection.label];
-      if (description != null && description.isNotEmpty) {
-        // Extract just the description part (after "**Description:**")
-        String shortDesc = description;
-        if (description.contains('**Description:**')) {
-          final parts = description.split('**Description:**');
-          if (parts.length > 1) {
-            shortDesc = parts[1].trim();
+      if (description == null || description.isEmpty) continue;
+
+      final rect = Rect.fromLTRB(
+        detection.boundingBox.left * scale,
+        detection.boundingBox.top * scale,
+        detection.boundingBox.right * scale,
+        detection.boundingBox.bottom * scale,
+      );
+
+      // Extract and format description text
+      String shortDesc = description;
+      if (description.contains('**Description:**')) {
+        final parts = description.split('**Description:**');
+        if (parts.length > 1) {
+          shortDesc = parts[1].trim();
+        }
+      }
+      if (shortDesc.length > 100) {
+        shortDesc = '${shortDesc.substring(0, 97)}...';
+      }
+
+      final descTextPainter = TextPainter(
+        textDirection: TextDirection.ltr,
+        textAlign: TextAlign.left,
+        maxLines: 3,
+      );
+
+      descTextPainter.text = TextSpan(
+        text: shortDesc,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.normal,
+          height: 1.2,
+        ),
+      );
+      descTextPainter.layout(maxWidth: 200);
+
+      final descWidth = descTextPainter.width + 12;
+      final descHeight = descTextPainter.height + 8;
+
+      // Try different positions in order of preference
+      final positions = [
+        // Right of box
+        Offset(rect.right + 8, rect.top),
+        // Left of box
+        Offset(rect.left - descWidth - 8, rect.top),
+        // Below box
+        Offset(rect.left, rect.bottom + 8),
+        // Above box
+        Offset(rect.left, rect.top - descHeight - 8),
+        // Right-bottom
+        Offset(rect.right + 8, rect.bottom - descHeight),
+        // Left-bottom
+        Offset(rect.left - descWidth - 8, rect.bottom - descHeight),
+      ];
+
+      Rect? descRect;
+      for (final pos in positions) {
+        final candidateRect = Rect.fromLTWH(
+          pos.dx,
+          pos.dy,
+          descWidth,
+          descHeight,
+        );
+
+        // Check if within bounds
+        if (candidateRect.left < 0 || candidateRect.right > size.width ||
+            candidateRect.top < 0 || candidateRect.bottom > size.height) {
+          continue;
+        }
+
+        // Check for overlaps with occupied regions
+        bool hasOverlap = false;
+        for (final occupied in occupiedRegions) {
+          if (candidateRect.overlaps(occupied)) {
+            hasOverlap = true;
+            break;
           }
         }
-        // Limit to first 100 characters
-        if (shortDesc.length > 100) {
-          shortDesc = '${shortDesc.substring(0, 97)}...';
+
+        if (!hasOverlap) {
+          descRect = candidateRect;
+          break;
         }
-
-        final descTextPainter = TextPainter(
-          textDirection: TextDirection.ltr,
-          textAlign: TextAlign.left,
-          maxLines: 3,
-        );
-
-        descTextPainter.text = TextSpan(
-          text: shortDesc,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 11,
-            fontWeight: FontWeight.normal,
-            height: 1.2,
-          ),
-        );
-        descTextPainter.layout(maxWidth: 200);
-
-        // Position description to the right of the box
-        final descLeft = rect.right + 8;
-        final descTop = rect.top;
-
-        // Background for description
-        final descRect = Rect.fromLTWH(
-          descLeft,
-          descTop,
-          descTextPainter.width + 12,
-          descTextPainter.height + 8,
-        );
-
-        // Semi-transparent background
-        canvas.drawRRect(
-          RRect.fromRectXY(descRect, 8, 8),
-          Paint()..color = Colors.black.withValues(alpha: 0.75),
-        );
-
-        // Draw description text
-        descTextPainter.paint(
-          canvas,
-          Offset(descLeft + 6, descTop + 4),
-        );
       }
+
+      // If no position found, place it anyway at the least bad position
+      descRect ??= Rect.fromLTWH(
+        (rect.right + 8).clamp(0, size.width - descWidth),
+        rect.top.clamp(0, size.height - descHeight),
+        descWidth,
+        descHeight,
+      );
+
+      // Mark this region as occupied
+      occupiedRegions.add(descRect);
+
+      // Draw description background
+      canvas.drawRRect(
+        RRect.fromRectXY(descRect, 8, 8),
+        Paint()..color = Colors.black.withValues(alpha: 0.75),
+      );
+
+      // Draw description text
+      descTextPainter.paint(
+        canvas,
+        Offset(descRect.left + 6, descRect.top + 4),
+      );
     }
   }
 
