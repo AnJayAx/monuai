@@ -19,7 +19,7 @@
 
 ### 📺 Demo
 
-![MonuAI Application Video](assets/Demo.mp4)
+https://github.com/user-attachments/assets/4365ed8b-e4f8-4a08-94fe-c04ced862c85
 
 </div>
 
